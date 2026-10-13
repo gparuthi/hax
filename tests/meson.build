@@ -190,6 +190,7 @@ e2e_scenarios = [
     'repl_status',
     'repl_status_label',
     'repl_status_tools',
+    'repl_typeahead',
 ]
 
 e2e_env = environment({'HAX_BIN': hax_exe.full_path()})
