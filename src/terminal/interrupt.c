@@ -9,14 +9,17 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
+#include "buf.h"
 #include "terminal/ansi.h"
 
 #define ESCAPE_TIMEOUT_MS       50
 #define ESCAPE_POLL_INTERVAL_MS 5
+#define TYPEAHEAD_MAX_BYTES     (64 * 1024)
 
 struct interrupt_watcher {
     pthread_t thread;
@@ -35,6 +38,13 @@ struct interrupt_watcher {
     volatile sig_atomic_t saved_termios_valid;
     volatile sig_atomic_t raw_mode_active;
     volatile sig_atomic_t interactive_terminal;
+    /* Owned by the watcher thread while armed and by interrupt_disarm() once it is idle. */
+    struct interrupt_typeahead_filter typeahead_filter;
+    struct buf typeahead_chunk;
+    /* Guarded by mutex. */
+    unsigned char typeahead[TYPEAHEAD_MAX_BYTES];
+    size_t typeahead_len;
+    size_t typeahead_replayed;
 };
 
 /* Exit and signal handlers require process-wide terminal state. */
@@ -88,6 +98,79 @@ int interrupt_classifier_timeout(struct interrupt_classifier *classifier)
     return 1;
 }
 
+static const char PASTE_BEGIN[] = ANSI_CSI "200~";
+static const char PASTE_END[] = ANSI_CSI "201~";
+
+void interrupt_typeahead_filter_init(struct interrupt_typeahead_filter *filter)
+{
+    interrupt_classifier_init(&filter->classifier);
+    filter->sequence_len = 0;
+    filter->paste_end_matched = 0;
+    filter->in_paste = 0;
+}
+
+static void feed_paste_byte(struct interrupt_typeahead_filter *filter, unsigned char byte)
+{
+    if (byte == (unsigned char)PASTE_END[filter->paste_end_matched])
+        filter->paste_end_matched++;
+    else
+        filter->paste_end_matched = byte == (unsigned char)PASTE_END[0];
+    if (filter->paste_end_matched == sizeof(PASTE_END) - 1) {
+        filter->paste_end_matched = 0;
+        filter->in_paste = 0;
+    }
+}
+
+static void hold_sequence_byte(struct interrupt_typeahead_filter *filter, unsigned char byte)
+{
+    if (filter->sequence_len < sizeof(filter->sequence))
+        filter->sequence[filter->sequence_len] = (char)byte;
+    filter->sequence_len++;
+}
+
+/* Return true when the finished sequence opens a bracketed paste, which replays as a paste. */
+static int sequence_is_paste_begin(const struct interrupt_typeahead_filter *filter)
+{
+    return filter->sequence_len == sizeof(PASTE_BEGIN) - 1 &&
+           memcmp(filter->sequence, PASTE_BEGIN, filter->sequence_len) == 0;
+}
+
+int interrupt_typeahead_filter_feed(struct interrupt_typeahead_filter *filter,
+                                    const unsigned char *bytes, size_t len, struct buf *out)
+{
+    int bare_escapes = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char byte = bytes[i];
+        if (filter->in_paste) {
+            buf_append(out, &byte, 1);
+            feed_paste_byte(filter, byte);
+            continue;
+        }
+
+        enum interrupt_classifier_state before = filter->classifier.state;
+        bare_escapes += interrupt_classifier_feed(&filter->classifier, byte);
+        enum interrupt_classifier_state after = filter->classifier.state;
+        if (after == INTERRUPT_CLASSIFIER_ESCAPE_PENDING) {
+            filter->sequence_len = 0;
+            hold_sequence_byte(filter, byte);
+        } else if (after != INTERRUPT_CLASSIFIER_IDLE) {
+            hold_sequence_byte(filter, byte);
+        } else if (before == INTERRUPT_CLASSIFIER_IDLE ||
+                   before == INTERRUPT_CLASSIFIER_ESCAPE_PENDING) {
+            /* Ordinary input, or the byte that showed the Esc before it was bare. */
+            buf_append(out, &byte, 1);
+        } else {
+            /* Replaying arrow keys could recall and resubmit an old prompt, so only pastes pass. */
+            hold_sequence_byte(filter, byte);
+            if (sequence_is_paste_begin(filter)) {
+                buf_append(out, filter->sequence, filter->sequence_len);
+                filter->in_paste = 1;
+            }
+        }
+    }
+    return bare_escapes;
+}
+
 static int enter_raw_mode(void)
 {
     if (!watcher.saved_termios_valid)
@@ -98,6 +181,8 @@ static int enter_raw_mode(void)
     struct termios raw = watcher.saved_termios;
     /* ISIG remains enabled so Ctrl-C continues to raise SIGINT. */
     raw.c_lflag &= (tcflag_t) ~(ICANON | ECHO);
+    /* Type-ahead must keep Enter (CR, submit) distinct from Shift-Enter (LF, newline). */
+    raw.c_iflag &= (tcflag_t)~ICRNL;
     raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 0;
 
@@ -185,15 +270,36 @@ static void wait_until_disarmed(void)
     pthread_mutex_unlock(&watcher.mutex);
 }
 
+/* Queue the type-ahead in bytes read while armed and return the bare Escs they confirmed. */
+static int take_armed_input(const unsigned char *bytes, size_t len)
+{
+    struct buf *chunk = &watcher.typeahead_chunk;
+    buf_reset(chunk);
+    int bare_escapes =
+        interrupt_typeahead_filter_feed(&watcher.typeahead_filter, bytes, len, chunk);
+
+    pthread_mutex_lock(&watcher.mutex);
+    size_t queued = watcher.typeahead_len - watcher.typeahead_replayed;
+    /* Refuse rather than evict at the cap, so a queued message never loses its start. */
+    if (queued + chunk->len <= sizeof(watcher.typeahead)) {
+        memmove(watcher.typeahead, watcher.typeahead + watcher.typeahead_replayed, queued);
+        memcpy(watcher.typeahead + queued, chunk->data, chunk->len);
+        watcher.typeahead_len = queued + chunk->len;
+        watcher.typeahead_replayed = 0;
+    }
+    pthread_mutex_unlock(&watcher.mutex);
+    return bare_escapes;
+}
+
 static void watch_armed_input(void)
 {
-    struct interrupt_classifier classifier;
-    interrupt_classifier_init(&classifier);
+    struct interrupt_classifier *classifier = &watcher.typeahead_filter.classifier;
+    interrupt_typeahead_filter_init(&watcher.typeahead_filter);
     atomic_store(&watcher.escape_pending, 0);
 
     for (;;) {
         int timeout_ms =
-            classifier.state == INTERRUPT_CLASSIFIER_ESCAPE_PENDING ? ESCAPE_TIMEOUT_MS : -1;
+            classifier->state == INTERRUPT_CLASSIFIER_ESCAPE_PENDING ? ESCAPE_TIMEOUT_MS : -1;
         enum input_event event = wait_for_input(timeout_ms);
         if (event == INPUT_ERROR) {
             if (errno == EINTR)
@@ -202,10 +308,10 @@ static void watch_armed_input(void)
             return;
         }
         if (event == INPUT_TIMEOUT) {
-            if (interrupt_classifier_timeout(&classifier))
+            if (interrupt_classifier_timeout(classifier))
                 latch_pause_or_abort();
             atomic_store(&watcher.escape_pending,
-                         classifier.state == INTERRUPT_CLASSIFIER_ESCAPE_PENDING);
+                         classifier->state == INTERRUPT_CLASSIFIER_ESCAPE_PENDING);
             continue;
         }
         if (event == INPUT_WAKE) {
@@ -230,12 +336,11 @@ static void watch_armed_input(void)
             wait_until_disarmed();
             return;
         }
-        for (ssize_t i = 0; i < bytes_read; i++) {
-            if (interrupt_classifier_feed(&classifier, bytes[i]))
-                latch_pause_or_abort();
-        }
+        int bare_escapes = take_armed_input(bytes, (size_t)bytes_read);
+        while (bare_escapes-- > 0)
+            latch_pause_or_abort();
         atomic_store(&watcher.escape_pending,
-                     classifier.state == INTERRUPT_CLASSIFIER_ESCAPE_PENDING);
+                     classifier->state == INTERRUPT_CLASSIFIER_ESCAPE_PENDING);
     }
 }
 
@@ -399,10 +504,42 @@ void interrupt_arm(void)
         return;
 
     pthread_mutex_lock(&watcher.mutex);
-    if (!watcher.armed && enter_raw_mode() == 0) {
+    int armed = !watcher.armed && enter_raw_mode() == 0;
+    if (armed) {
         watcher.armed = 1;
         pthread_cond_broadcast(&watcher.state_changed);
     }
+    pthread_mutex_unlock(&watcher.mutex);
+    /* Pastes keep their markers in type-ahead, so the editor inserts them instead of submitting
+     * at each line. */
+    if (armed) {
+        fputs(ANSI_BRACKETED_PASTE_ENABLE, stdout);
+        fflush(stdout);
+    }
+}
+
+/* Read keys still queued in the terminal; VMIN=0 keeps the raw-mode read from blocking. */
+static void drain_typeahead(void)
+{
+    unsigned char bytes[64];
+    ssize_t bytes_read;
+    /* Escs confirmed here came after the work they would interrupt, so they are dropped. */
+    while ((bytes_read = read(STDIN_FILENO, bytes, sizeof(bytes))) > 0)
+        (void)take_armed_input(bytes, (size_t)bytes_read);
+}
+
+/* After an Esc the user wants to look before anything else is sent, so queued Enters become
+ * newlines and the type-ahead waits in the editor as a draft. */
+static void hold_typeahead(void)
+{
+    pthread_mutex_lock(&watcher.mutex);
+    for (size_t i = watcher.typeahead_replayed; i < watcher.typeahead_len; i++) {
+        if (watcher.typeahead[i] == '\r')
+            watcher.typeahead[i] = '\n';
+    }
+    while (watcher.typeahead_len > watcher.typeahead_replayed &&
+           watcher.typeahead[watcher.typeahead_len - 1] == '\n')
+        watcher.typeahead_len--;
     pthread_mutex_unlock(&watcher.mutex);
 }
 
@@ -425,10 +562,30 @@ void interrupt_disarm(void)
     pthread_mutex_lock(&watcher.mutex);
     while (!watcher.idle)
         pthread_cond_wait(&watcher.state_changed, &watcher.mutex);
-    leave_raw_mode();
     pthread_mutex_unlock(&watcher.mutex);
 
-    tcflush(STDIN_FILENO, TCIFLUSH);
+    drain_typeahead();
+    if (atomic_load(&watcher.pause_requested))
+        hold_typeahead();
+    fputs(ANSI_BRACKETED_PASTE_DISABLE, stdout);
+    fflush(stdout);
+
+    pthread_mutex_lock(&watcher.mutex);
+    leave_raw_mode();
+    pthread_mutex_unlock(&watcher.mutex);
+}
+
+int interrupt_typeahead_pop(unsigned char *byte)
+{
+    if (!watcher.started)
+        return 0;
+
+    pthread_mutex_lock(&watcher.mutex);
+    int popped = watcher.typeahead_replayed < watcher.typeahead_len;
+    if (popped)
+        *byte = watcher.typeahead[watcher.typeahead_replayed++];
+    pthread_mutex_unlock(&watcher.mutex);
+    return popped;
 }
 
 int interrupt_pause_requested(void)

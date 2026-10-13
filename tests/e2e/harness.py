@@ -398,6 +398,12 @@ class Terminal:
         """Send named keys in tmux's spelling: Enter, Escape, C-c, BSpace, ..."""
         self._run("send-keys", "-t", "hax", "--", *keys)
 
+    def paste(self, text: str) -> None:
+        """Paste `text` the way a terminal does: bracketed while hax asks for it, and with each
+        newline sent as CR."""
+        self._run("set-buffer", "--", text)
+        self._run("paste-buffer", "-p", "-d", "-t", "hax")
+
     def screen(self, styles: bool = False) -> str:
         """The visible rows; `styles` keeps the SGR sequences that color and dim them."""
         return self._run("capture-pane", "-p", "-t", "hax", *(["-e"] if styles else []))

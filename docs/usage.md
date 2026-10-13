@@ -131,6 +131,11 @@ The editor supports common readline-style movement and history keys. Notable hax
 | Tab | Complete a `/` command name or argument. |
 | `@` + Tab | Choose a project file with `fzf`. |
 
+Keys typed while hax is working are not lost: they replay into the next prompt as if typed there,
+so a message typed with Enter during a turn is sent once the turn ends. Pastes wait in the prompt as
+a draft and arrow keys are dropped. After Esc, the typed text also waits as a draft, so nothing is
+sent before you have looked.
+
 Ctrl-O is the best view for reviewing what happened. Ctrl-T includes the system prompt, tool schemas,
 model-visible tool calls/results, and post-compaction context; use it when diagnosing why the model
 behaved a certain way. Both default to `less -R` when `$PAGER` is unset.
