@@ -2,6 +2,8 @@
 #ifndef HAX_TERMINAL_INTERRUPT_H
 #define HAX_TERMINAL_INTERRUPT_H
 
+#include <stddef.h>
+
 /* Initialize bare-Esc detection and terminal restoration. Detection is available only when stdin
  * and stdout are TTYs; otherwise the watcher API is inert and request queries return false. */
 void interrupt_init(void);
@@ -23,9 +25,17 @@ void interrupt_install_request_signal_handlers(void);
  * abort. Arming is idempotent and does not clear requests left by an earlier cycle. */
 void interrupt_arm(void);
 
-/* Stop detection, wait until the watcher no longer owns stdin, restore terminal mode, and discard
- * input received while armed. Disarming is idempotent. */
+/* Stop detection, wait until the watcher no longer owns stdin, and restore terminal mode. Input
+ * received while armed is kept as type-ahead rather than discarded; if an Esc requested a pause
+ * or abort, its Enters become newlines so it waits in the editor instead of submitting.
+ * Disarming is idempotent. */
 void interrupt_disarm(void);
+
+/* Pop the oldest byte typed while armed: ordinary keys and bracketed pastes, without Escs or other
+ * escape sequences. Return 1 with the byte in `*byte`, or 0 when none is queued. The editor replays
+ * these before reading the terminal, so a message typed with Enter during a turn submits after it.
+ * Call only while disarmed. */
+int interrupt_typeahead_pop(unsigned char *byte);
 
 /* Requests remain latched until interrupt_clear_requests(). Abort implies pause. These queries are
  * safe from any thread. */
@@ -56,5 +66,24 @@ int interrupt_classifier_feed(struct interrupt_classifier *classifier, unsigned 
 
 /* Return true when the timeout confirms a pending Esc was bare. */
 int interrupt_classifier_timeout(struct interrupt_classifier *classifier);
+
+/* Type-ahead filter over the classifier, exposed for direct testing like it. */
+struct buf;
+
+struct interrupt_typeahead_filter {
+    struct interrupt_classifier classifier;
+    char sequence[8]; /* the escape sequence in progress, truncated past its size */
+    size_t sequence_len;
+    size_t paste_end_matched; /* bytes of the paste end marker seen so far */
+    int in_paste;
+};
+
+void interrupt_typeahead_filter_init(struct interrupt_typeahead_filter *filter);
+
+/* Append the type-ahead in `bytes` to `out`: ordinary bytes, plus bracketed pastes verbatim with
+ * their markers. Bare Escs and every other escape sequence are dropped, and bytes inside a paste
+ * are never classified as Esc. Return how many bare Escs the bytes confirmed. */
+int interrupt_typeahead_filter_feed(struct interrupt_typeahead_filter *filter,
+                                    const unsigned char *bytes, size_t len, struct buf *out);
 
 #endif /* HAX_TERMINAL_INTERRUPT_H */

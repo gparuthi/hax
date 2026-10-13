@@ -25,6 +25,7 @@
 #include "system/spawn.h"
 #include "terminal/ansi.h"
 #include "terminal/input_core.h"
+#include "terminal/interrupt.h"
 #include "terminal/theme.h"
 #include "terminal/ui.h"
 #include "terminal/width.h"
@@ -115,6 +116,9 @@ static void disable_raw_mode(struct input *in)
 
 static int read_byte_blocking(unsigned char *out)
 {
+    /* Keys typed during the last turn come first, exactly as if typed now. */
+    if (interrupt_typeahead_pop(out))
+        return 1;
     for (;;) {
         ssize_t n = read(STDIN_FILENO, out, 1);
         if (n == 1)
@@ -132,6 +136,8 @@ static int read_byte_timeout(unsigned char *out, int timeout_ms)
     struct pollfd input = {.fd = STDIN_FILENO, .events = POLLIN};
     int result;
 
+    if (interrupt_typeahead_pop(out))
+        return 1;
     do {
         result = poll(&input, 1, timeout_ms);
     } while (result < 0 && errno == EINTR);

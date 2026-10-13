@@ -178,6 +178,7 @@ e2e_scenarios = [
     'repl_complete',
     'repl_interrupt',
     'repl_smoke',
+    'repl_typeahead',
 ]
 
 python = find_program('python3')

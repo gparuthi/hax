@@ -7,6 +7,12 @@ notes (see [docs/releasing.md](docs/releasing.md)).
 
 ## [Unreleased]
 
+### Added
+
+- Keys typed while hax is working are kept and replayed into the next prompt instead of being
+  discarded, so a message typed with Enter during a turn is sent when the turn ends. Pastes wait in
+  the prompt as a draft, arrow keys are dropped, and after Esc the typed text waits as a draft too.
+
 ## [0.6.1] - 2026-10-15
 
 ### Added
