@@ -90,6 +90,7 @@ sources = files(
     'src/effort.c',
     'src/file_mention.c',
     'src/history.c',
+    'src/image_attach.c',
     'src/model_meta.c',
     'src/model_sort.c',
     'src/oneshot.c',

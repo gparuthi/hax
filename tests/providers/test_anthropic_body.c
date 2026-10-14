@@ -334,8 +334,37 @@ static void test_build_body_thinking_off(void)
     json_decref(body);
 }
 
+/* An --image prompt: a text block, then one base64 image block per image. */
+static void test_user_message_images(void)
+{
+    struct item_image images[] = {
+        {.mime = "image/jpeg", .data_b64 = "QUJD", .width = 4, .height = 2},
+    };
+    struct item items[] = {
+        {.kind = ITEM_USER_MESSAGE, .text = "transcribe", .images = images, .n_images = 1},
+    };
+
+    json_t *messages = anthropic_build_messages(items, 1, "anthropic", "m", 0, 1);
+    json_t *content = message_content(message_at(messages, 0));
+    EXPECT_STR_EQ(message_role(message_at(messages, 0)), "user");
+    EXPECT(json_array_size(content) == 2);
+    EXPECT_STR_EQ(block_type(json_array_get(content, 0)), "text");
+    json_t *image = json_array_get(content, 1);
+    EXPECT_STR_EQ(block_type(image), "image");
+    json_t *source = json_object_get(image, "source");
+    EXPECT_STR_EQ(json_string_value(json_object_get(source, "media_type")), "image/jpeg");
+    EXPECT_STR_EQ(json_string_value(json_object_get(source, "data")), "QUJD");
+    json_decref(messages);
+
+    messages = anthropic_build_messages(items, 1, "anthropic", "m", 0, 0);
+    content = message_content(message_at(messages, 0));
+    EXPECT_STR_EQ(block_type(json_array_get(content, 1)), "text");
+    json_decref(messages);
+}
+
 int main(void)
 {
+    test_user_message_images();
     test_user_message();
     test_assistant_group_thinking_text_tool();
     test_empty_signature_policy();

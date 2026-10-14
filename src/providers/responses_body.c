@@ -44,6 +44,33 @@ static json_t *build_message(const char *role, const char *content_type, const c
     return json_pack("{s:s, s:s, s:o}", "type", "message", "role", role, "content", content);
 }
 
+/* A user message with attached images: its text part, then one input_image per image. */
+static json_t *build_user_message(const struct item *item, int image_input)
+{
+    if (item->n_images == 0)
+        return build_message("user", "input_text", item->text);
+
+    json_t *content = json_array();
+    json_array_append_new(content, json_pack("{s:s, s:s}", "type", "input_text", "text",
+                                             item->text ? item->text : ""));
+    for (size_t i = 0; i < item->n_images; i++) {
+        const struct item_image *image = &item->images[i];
+        if (image_input != 0) {
+            char *url = xasprintf("data:%s;base64,%s", image->mime ? image->mime : "image/png",
+                                  image->data_b64 ? image->data_b64 : "");
+            json_array_append_new(content,
+                                  json_pack("{s:s, s:s}", "type", "input_image", "image_url", url));
+            free(url);
+        } else {
+            char *placeholder = item_image_placeholder(image);
+            json_array_append_new(
+                content, json_pack("{s:s, s:s}", "type", "input_text", "text", placeholder));
+            free(placeholder);
+        }
+    }
+    return json_pack("{s:s, s:s, s:o}", "type", "message", "role", "user", "content", content);
+}
+
 static json_t *build_reasoning_input(const struct item *item, const char *provider,
                                      const char *model)
 {
@@ -59,7 +86,7 @@ static json_t *build_input_item(const struct item *item, const char *provider, c
 {
     switch (item->kind) {
     case ITEM_USER_MESSAGE:
-        return build_message("user", "input_text", item->text);
+        return build_user_message(item, image_input);
     case ITEM_ASSISTANT_MESSAGE:
         return build_message("assistant", "output_text", item->text);
     case ITEM_TOOL_CALL:

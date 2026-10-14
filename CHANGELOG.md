@@ -12,6 +12,8 @@ notes (see [docs/releasing.md](docs/releasing.md)).
 - Keys typed while hax is working are kept and replayed into the next prompt instead of being
   discarded, so a message typed with Enter during a turn is sent when the turn ends. Pastes wait in
   the prompt as a draft, arrow keys are dropped, and after Esc the typed text waits as a draft too.
+- `--image=PATH` attaches an image to a `-p` / `--json` prompt, inline in the user message, so a
+  tool-less `--raw` run can see it. Repeatable; refused when the model is known not to take images.
 
 ## [0.6.1] - 2026-10-15
 

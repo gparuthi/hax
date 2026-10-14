@@ -36,6 +36,7 @@ hax --resume=ID -p "continue"    # resume non-interactively
 | `--resume[=ID]` | Pick a session, or resume an id/unique prefix. The id form works with `-p`; without a prompt it continues the run. |
 | `--no-session` | Do not record this run or add its prompts to persistent recall. |
 | `--raw` | Send only the prompt: no system/context sections and no tools. |
+| `--image=PATH` | Attach an image to the one-shot prompt (repeatable). It is sent inline, so it works with `--raw`. |
 | `--bare` | Keep the base prompt, environment, and tools, but omit project/delegation context. |
 | `--provider=NAME` | Select a provider for this run. |
 | `--model=ID` | Select a model for this run. |
