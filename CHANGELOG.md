@@ -7,6 +7,11 @@ notes (see [docs/releasing.md](docs/releasing.md)).
 
 ## [Unreleased]
 
+### Added
+
+- `--image=PATH` attaches an image to a `-p` / `--json` prompt, inline in the user message, so a
+  tool-less `--raw` run can see it. Repeatable; refused when the model is known not to take images.
+
 ## [0.6.1] - 2026-10-15
 
 ### Added

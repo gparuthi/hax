@@ -164,6 +164,40 @@ static void test_parse_json_implies_print(void)
     EXPECT(options.agent_options.json == 0);
 }
 
+static void test_parse_image_flags(void)
+{
+    struct cli_options options;
+    char *two_images[] = {"hax", "--raw", "--image=a.jpg", "-p", "--image", "b.png", "hi", NULL};
+    EXPECT(cli_parse(7, two_images, &options) == CLI_PARSE_OK);
+    EXPECT(options.agent_options.n_image_paths == 2);
+    EXPECT_STR_EQ(options.agent_options.image_paths[0], "a.jpg");
+    EXPECT_STR_EQ(options.agent_options.image_paths[1], "b.png");
+    EXPECT(options.agent_options.raw == 1);
+
+    char *with_json[] = {"hax", "--json", "--image=a.jpg", "hi", NULL};
+    EXPECT(cli_parse(4, with_json, &options) == CLI_PARSE_OK);
+    EXPECT(options.agent_options.n_image_paths == 1);
+
+    char *interactive[] = {"hax", "--image=a.jpg", NULL};
+    EXPECT(cli_parse(2, interactive, &options) == CLI_PARSE_ERROR);
+
+    char *empty[] = {"hax", "-p", "--image=", "hi", NULL};
+    EXPECT(cli_parse(4, empty, &options) == CLI_PARSE_ERROR);
+
+    char *argv[IMAGE_REQUEST_MAX_COUNT + 4];
+    int argc = 0;
+    argv[argc++] = "hax";
+    argv[argc++] = "-p";
+    for (int i = 0; i <= IMAGE_REQUEST_MAX_COUNT; i++)
+        argv[argc++] = "--image=x.png";
+    argv[argc] = NULL;
+    EXPECT(cli_parse(argc, argv, &options) == CLI_PARSE_ERROR);
+
+    char *plain[] = {"hax", "-p", "hi", NULL};
+    EXPECT(cli_parse(3, plain, &options) == CLI_PARSE_OK);
+    EXPECT(options.agent_options.n_image_paths == 0);
+}
+
 struct flag_call {
     const char *flag;
     enum cli_parse_result result;
@@ -404,6 +438,7 @@ int main(void)
     test_parse_rejects_missing_values_and_interactive_prompt();
     test_parse_leading_preset();
     test_parse_json_implies_print();
+    test_parse_image_flags();
     test_parse_version_prints_and_exits();
     test_help_wraps_to_display_width();
     test_read_prompt_from_stream();

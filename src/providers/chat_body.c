@@ -164,6 +164,44 @@ static char *tool_result_text(const struct item *item)
     return text.data;
 }
 
+/* User content stays a plain string unless images ride along: then text and image_url parts,
+ * or the text with placeholders when the model takes no images. */
+static void append_user_message(json_t *messages, const struct item *item, int image_input)
+{
+    const char *text = item->text ? item->text : "";
+    if (item->n_images == 0) {
+        json_array_append_new(messages, json_pack("{s:s, s:s}", "role", "user", "content", text));
+        return;
+    }
+    if (image_input == 0) {
+        struct buf content;
+        buf_init(&content);
+        buf_append_str(&content, text);
+        for (size_t i = 0; i < item->n_images; i++) {
+            char *placeholder = item_image_placeholder(&item->images[i]);
+            buf_append_str(&content, "\n");
+            buf_append_str(&content, placeholder);
+            free(placeholder);
+        }
+        json_array_append_new(messages, json_pack("{s:s, s:s}", "role", "user", "content",
+                                                  content.data ? content.data : ""));
+        buf_free(&content);
+        return;
+    }
+
+    json_t *parts = json_array();
+    json_array_append_new(parts, json_pack("{s:s, s:s}", "type", "text", "text", text));
+    for (size_t i = 0; i < item->n_images; i++) {
+        const struct item_image *image = &item->images[i];
+        char *url = xasprintf("data:%s;base64,%s", image->mime ? image->mime : "image/png",
+                              image->data_b64 ? image->data_b64 : "");
+        json_array_append_new(
+            parts, json_pack("{s:s, s:{s:s}}", "type", "image_url", "image_url", "url", url));
+        free(url);
+    }
+    json_array_append_new(messages, json_pack("{s:s, s:o}", "role", "user", "content", parts));
+}
+
 static void append_tool_result(json_t *messages, const struct item *item, int image_input)
 {
     char *text_with_placeholders = NULL;
@@ -234,8 +272,7 @@ json_t *chat_build_messages(const char *system_prompt, const struct item *items,
     while (index < n_items) {
         switch (items[index].kind) {
         case ITEM_USER_MESSAGE:
-            json_array_append_new(messages, json_pack("{s:s, s:s}", "role", "user", "content",
-                                                      items[index].text ? items[index].text : ""));
+            append_user_message(messages, &items[index], image_input);
             index++;
             break;
         case ITEM_ASSISTANT_MESSAGE:

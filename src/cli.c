@@ -50,6 +50,9 @@ static const struct help_option {
     {"--bare",
      "Run without project and delegation context — no AGENTS.md, skills, or subagents "
      "section. The Environment section, tools, and base system prompt remain (unlike --raw)."},
+    {"--image=PATH",
+     "Attach an image file to the prompt (-p / --json only; repeatable). The model sees it "
+     "inline with the prompt text, so this works with --raw."},
     {"--provider=NAME", "Select the backend for this run."},
     {"--model=ID", "Select the model for this run."},
     {"--effort=LEVEL", "Select the reasoning effort for this run."},
@@ -160,6 +163,7 @@ enum cli_parse_result cli_parse(int argc, char **argv, struct cli_options *optio
         OPT_BARE,
         OPT_NO_SESSION,
         OPT_JSON,
+        OPT_IMAGE,
     };
     static const struct option long_options[] = {
         {"help", no_argument, NULL, 'h'},
@@ -171,6 +175,7 @@ enum cli_parse_result cli_parse(int argc, char **argv, struct cli_options *optio
         {"json", no_argument, NULL, OPT_JSON},
         {"raw", no_argument, NULL, OPT_RAW},
         {"bare", no_argument, NULL, OPT_BARE},
+        {"image", required_argument, NULL, OPT_IMAGE},
         {"provider", required_argument, NULL, OPT_PROVIDER},
         {"model", required_argument, NULL, OPT_MODEL},
         {"effort", required_argument, NULL, OPT_EFFORT},
@@ -238,6 +243,19 @@ enum cli_parse_result cli_parse(int argc, char **argv, struct cli_options *optio
             options->agent_options.json = 1;
             options->one_shot = 1;
             break;
+        case OPT_IMAGE: {
+            struct hax_opts *agent = &options->agent_options;
+            if (!*optarg) {
+                hax_err("--image= requires a path");
+                return CLI_PARSE_ERROR;
+            }
+            if (agent->n_image_paths == IMAGE_REQUEST_MAX_COUNT) {
+                hax_err("at most %d --image files per run", IMAGE_REQUEST_MAX_COUNT);
+                return CLI_PARSE_ERROR;
+            }
+            agent->image_paths[agent->n_image_paths++] = optarg;
+            break;
+        }
         case '?':
             fprintf(stderr, "Try 'hax --help' for usage.\n");
             return CLI_PARSE_ERROR;
@@ -270,6 +288,10 @@ enum cli_parse_result cli_parse(int argc, char **argv, struct cli_options *optio
     }
     if (options->one_shot && options->resume_mode == CLI_RESUME_SELECT && !options->resume_id) {
         hax_err("-p with --resume requires a session id (e.g. --resume=ID)");
+        return CLI_PARSE_ERROR;
+    }
+    if (options->agent_options.n_image_paths > 0 && !options->one_shot) {
+        hax_err("--image requires -p / --print or --json");
         return CLI_PARSE_ERROR;
     }
     if (!options->one_shot && optind < argc) {

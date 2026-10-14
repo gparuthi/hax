@@ -17,10 +17,12 @@
 #include "compact.h"
 #include "config.h"
 #include "diag.h"
+#include "image_attach.h"
 #include "model_meta.h"
 #include "provider.h"
 #include "session.h"
 #include "transcript.h"
+#include "xalloc.h"
 #include "system/clock.h"
 #include "terminal/ansi.h"
 #include "terminal/interrupt.h"
@@ -43,6 +45,9 @@ struct oneshot_state {
     int json;           /* stream conversation records as JSONL on stdout */
     size_t json_cursor; /* session items already streamed */
     int json_errno;     /* first stream-write failure; 0 while the stream is healthy */
+    /* --image parts loaded at startup, owned until moved onto the prompt's user message */
+    struct item_image *images;
+    size_t n_images;
 };
 
 /* Compaction has no pause seam, so either latched request cancels the retriable transaction;
@@ -381,9 +386,54 @@ static void print_exit_notes(struct oneshot_state *state, double spend, int spen
 
 static void oneshot_state_destroy(struct oneshot_state *state)
 {
+    for (size_t i = 0; i < state->n_images; i++) {
+        free(state->images[i].mime);
+        free(state->images[i].data_b64);
+    }
+    free(state->images);
+    state->images = NULL;
+    state->n_images = 0;
     transcript_log_close(state->transcript);
     session_log_close(state->session_log);
     agent_session_free(&state->session);
+}
+
+/* Load every --image before anything is recorded or sent, so a bad file fails the run up front.
+ * A model known not to take images is refused rather than sent placeholders. */
+static int load_images(struct oneshot_state *state, const char *prompt,
+                       const struct hax_opts *options)
+{
+    if (options->n_image_paths == 0)
+        return 0;
+    if (!prompt) {
+        hax_err("--image needs a prompt to attach to");
+        return -1;
+    }
+    if (model_meta_image_input(state->provider, state->session.model) == 0) {
+        hax_err("model '%s' does not accept image input, so --image cannot be sent (set "
+                "image_input=on if this detection is wrong)",
+                state->session.model);
+        return -1;
+    }
+    state->images = xcalloc(options->n_image_paths, sizeof(*state->images));
+    for (size_t i = 0; i < options->n_image_paths; i++) {
+        char *error = NULL;
+        if (image_attach_load(options->image_paths[i], &state->images[state->n_images], &error) !=
+            0) {
+            hax_err("%s", error);
+            free(error);
+            return -1;
+        }
+        state->n_images++;
+    }
+    if (items_image_base64_bytes(
+            &(struct item){.images = state->images, .n_images = state->n_images}, 1) >
+        IMAGE_REQUEST_BASE64_BUDGET_BYTES) {
+        hax_err("--image files exceed the %zu MB request budget",
+                IMAGE_REQUEST_BASE64_BUDGET_BYTES / (1024 * 1024));
+        return -1;
+    }
+    return 0;
 }
 
 /* Prepare the run up to its first provider call: process-wide signal dispositions, the resolved
@@ -414,6 +464,9 @@ static int start_run(struct oneshot_state *state, const char *prompt,
                 provider->name ? provider->name : "?");
         return -1;
     }
+
+    if (load_images(state, prompt, options) != 0)
+        return -1;
 
     if (open_session(state, options) != 0)
         return -1;
@@ -467,6 +520,13 @@ static void run_user_turn(struct oneshot_state *state, const char *prompt, int m
     int continued = 0;
     if (prompt) {
         agent_session_add_user(&state->session, prompt);
+        if (state->n_images > 0) {
+            struct item *user = &state->session.items[state->session.n_items - 1];
+            user->images = state->images;
+            user->n_images = state->n_images;
+            state->images = NULL;
+            state->n_images = 0;
+        }
     } else {
         switch (agent_session_resume_tail(&state->session)) {
         case AGENT_RESUME_TAIL_MARKED:
