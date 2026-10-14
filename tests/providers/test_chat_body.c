@@ -701,8 +701,45 @@ static void test_build_body_minimal_opts(void)
     json_decref(body);
 }
 
+/* An --image prompt: user content becomes text + image_url parts, or a string with placeholders
+ * when the model takes no images. */
+static void test_user_message_images(void)
+{
+    struct item_image imgs[] = {
+        {.mime = "image/jpeg", .data_b64 = "QUJD", .width = 4, .height = 2},
+    };
+    struct item items[] = {
+        {.kind = ITEM_USER_MESSAGE, .text = "transcribe", .images = imgs, .n_images = 1},
+    };
+
+    json_t *msgs = chat_build_messages(NULL, items, 1, REPLAY_OFF, "llama.cpp", "m1", 1);
+    EXPECT(json_array_size(msgs) == 1);
+    json_t *parts = json_object_get(json_array_get(msgs, 0), "content");
+    EXPECT(json_is_array(parts));
+    EXPECT(json_array_size(parts) == 2);
+    EXPECT_STR_EQ(json_string_value(json_object_get(json_array_get(parts, 0), "text")),
+                  "transcribe");
+    json_t *img = json_array_get(parts, 1);
+    EXPECT_STR_EQ(json_string_value(json_object_get(img, "type")), "image_url");
+    EXPECT_STR_EQ(json_string_value(json_object_get(json_object_get(img, "image_url"), "url")),
+                  "data:image/jpeg;base64,QUJD");
+    json_decref(msgs);
+
+    msgs = chat_build_messages(NULL, items, 1, REPLAY_OFF, "llama.cpp", "m1", 0);
+    const char *text = json_string_value(json_object_get(json_array_get(msgs, 0), "content"));
+    EXPECT(text != NULL);
+    EXPECT(strncmp(text, "transcribe\n[image:", strlen("transcribe\n[image:")) == 0);
+    json_decref(msgs);
+
+    struct item plain[] = {{.kind = ITEM_USER_MESSAGE, .text = "hi"}};
+    msgs = chat_build_messages(NULL, plain, 1, REPLAY_OFF, "llama.cpp", "m1", 1);
+    EXPECT(json_is_string(json_object_get(json_array_get(msgs, 0), "content")));
+    json_decref(msgs);
+}
+
 int main(void)
 {
+    test_user_message_images();
     test_reasoning_format_parse();
     test_reasoning_effort_unset_omitted();
     test_reasoning_effort_flat();

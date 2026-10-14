@@ -160,6 +160,15 @@ json_t *anthropic_build_messages(const struct item *items, size_t n_items,
         case ITEM_USER_MESSAGE: {
             json_t *content = json_array();
             json_array_append_new(content, build_text_block(items[index].text));
+            for (size_t i = 0; i < items[index].n_images; i++) {
+                if (image_input != 0) {
+                    json_array_append_new(content, build_image_block(&items[index].images[i]));
+                } else {
+                    char *placeholder = item_image_placeholder(&items[index].images[i]);
+                    json_array_append_new(content, build_text_block(placeholder));
+                    free(placeholder);
+                }
+            }
             json_array_append_new(messages,
                                   json_pack("{s:s, s:o}", "role", "user", "content", content));
             index++;

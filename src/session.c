@@ -997,7 +997,9 @@ static void degrade_excess_images(struct item *items, size_t item_count)
             continue;
         }
 
-        char *output = xstrdup(item->output ? item->output : "");
+        /* User messages carry their text in `text`; tool results in `output`. */
+        char **field = item->kind == ITEM_USER_MESSAGE ? &item->text : &item->output;
+        char *output = xstrdup(*field ? *field : "");
         for (size_t image_index = 0; image_index < item->n_images; image_index++) {
             char *placeholder = item_image_placeholder(&item->images[image_index]);
             char *extended_output = xasprintf("%s\n%s", output, placeholder);
@@ -1010,8 +1012,8 @@ static void degrade_excess_images(struct item *items, size_t item_count)
         free(item->images);
         item->images = NULL;
         item->n_images = 0;
-        free(item->output);
-        item->output = output;
+        free(*field);
+        *field = output;
     }
 }
 

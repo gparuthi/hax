@@ -193,8 +193,41 @@ static void test_body_session_cache_key(void)
     json_decref(body);
 }
 
+/* An --image prompt: the user message keeps its text part, then one input_image per image, or a
+ * placeholder when the model takes no images. */
+static void test_user_message_images(void)
+{
+    struct item_image images[] = {
+        {.mime = "image/jpeg", .data_b64 = "QUJD", .width = 4, .height = 2},
+    };
+    struct item items[] = {
+        {.kind = ITEM_USER_MESSAGE, .text = "transcribe", .images = images, .n_images = 1},
+    };
+
+    json_t *input = responses_build_input_items(items, 1, "codex", "o3", -1);
+    json_t *content = json_object_get(json_array_get(input, 0), "content");
+    EXPECT(json_array_size(content) == 2);
+    EXPECT_STR_EQ(item_type(json_array_get(content, 0)), "input_text");
+    EXPECT_STR_EQ(json_string_value(json_object_get(json_array_get(content, 0), "text")),
+                  "transcribe");
+    json_t *image = json_array_get(content, 1);
+    EXPECT_STR_EQ(item_type(image), "input_image");
+    EXPECT_STR_EQ(json_string_value(json_object_get(image, "image_url")),
+                  "data:image/jpeg;base64,QUJD");
+    json_decref(input);
+
+    input = responses_build_input_items(items, 1, "codex", "o3", 0);
+    content = json_object_get(json_array_get(input, 0), "content");
+    EXPECT(json_array_size(content) == 2);
+    EXPECT_STR_EQ(item_type(json_array_get(content, 1)), "input_text");
+    EXPECT(strstr(json_string_value(json_object_get(json_array_get(content, 1), "text")),
+                  "[image:") != NULL);
+    json_decref(input);
+}
+
 int main(void)
 {
+    test_user_message_images();
     test_input_item_shapes();
     test_tool_result_image();
     test_reasoning_provenance();
