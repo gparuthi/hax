@@ -49,6 +49,7 @@ test_sources = [
     'test_session.c',
     'test_session_prune.c',
     'test_slash.c',
+    'test_tool_filter.c',
     'test_tool_schema.c',
     'test_trace.c',
     'test_transcript.c',

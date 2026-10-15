@@ -15,6 +15,7 @@
 #include "provider.h"
 #include "session.h"
 #include "tool.h"
+#include "tool_filter.h"
 #include "transcript.h"
 #include "turn.h"
 #include "xalloc.h"
@@ -69,6 +70,14 @@ const struct tool *agent_find_tool(const char *name)
             return TOOLS[i];
     }
     return NULL;
+}
+
+int agent_tools_validate(const char *list, char **error)
+{
+    const char *names[sizeof(TOOLS) / sizeof(TOOLS[0])];
+    for (size_t i = 0; i < N_TOOLS; i++)
+        names[i] = TOOLS[i]->def.name;
+    return tool_filter_validate(list, names, N_TOOLS, error);
 }
 
 void agent_session_append(struct agent_session *session, struct item item)
@@ -229,6 +238,8 @@ void agent_session_init(struct agent_session *session, struct provider *provider
     if (!opts->raw) {
         session->tools = xmalloc(N_TOOLS * sizeof(*session->tools));
         for (size_t i = 0; i < N_TOOLS; i++) {
+            if (!tool_filter_allows(TOOLS[i]->def.name))
+                continue;
             const struct tool_def *def =
                 TOOLS[i]->advertise ? TOOLS[i]->advertise() : &TOOLS[i]->def;
             if (def)

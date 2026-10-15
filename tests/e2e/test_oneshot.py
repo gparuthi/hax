@@ -3,8 +3,11 @@
 interrupted run."""
 
 import json
+import re
 import signal
+import tempfile
 import time
+from pathlib import Path
 
 import harness
 
@@ -106,6 +109,81 @@ def test_json_stream():
     out_file = result.workdir / "out.txt"
     harness.expect(out_file.exists(), "the tool call still executed", result)
     harness.expect(result.stderr == "", "no banner or stats duplicate the stream on stderr", result)
+
+
+def advertised_tools(transcript):
+    """Tool names in the transcript's model-facing tools section, which precedes the first turn."""
+    text = transcript.read_text()
+    if "── tools ──" not in text:
+        return []
+    section = text.split("── tools ──", 1)[1].split("# turn", 1)[0]
+    return re.findall(r"^\[(\w+)\]$", section, re.MULTILINE)
+
+
+def test_tools_flag_limits_offered_and_runnable_tools():
+    """--tools offers only the listed tools: the model-facing transcript lists just those, and a
+    scripted call to one left out is refused as unknown instead of running."""
+    transcript = Path(tempfile.mkdtemp(prefix="transcript-")) / "t.txt"
+    result = harness.run_oneshot(
+        "go",
+        """
+        text Trying bash anyway
+        tool bash {"command":"echo marker42 > out.txt"}
+        end-turn
+
+        text Done.
+        end-turn
+        """,
+        extra_args=["--json", "--tools=read,write"],
+        extra_env={"HAX_TRANSCRIPT": str(transcript)},
+    )
+    harness.expect(result.returncode == 0, "exit status is 0", result)
+    harness.expect(
+        not (result.workdir / "out.txt").exists(), "the withheld bash tool did not run", result
+    )
+    records = [json.loads(line) for line in result.stdout.splitlines()]
+    outputs = [r.get("output", "") for r in records if r.get("kind") == "tool_result"]
+    harness.expect(
+        outputs == ["unknown tool: bash"], "the call comes back as an unknown tool", result
+    )
+    offered = advertised_tools(transcript)
+    harness.expect(offered == ["read", "write"], f"only the listed tools are offered: {offered}", result)
+
+
+def test_tools_none_offers_no_tools():
+    """--tools=none keeps the prompt and context but advertises no tool at all."""
+    transcript = Path(tempfile.mkdtemp(prefix="transcript-")) / "t.txt"
+    result = harness.run_oneshot(
+        "hi",
+        """
+        text Plain answer
+        end-turn
+        """,
+        extra_args=["--tools=none"],
+        extra_env={"HAX_TRANSCRIPT": str(transcript)},
+    )
+    harness.expect(result.returncode == 0, "exit status is 0", result)
+    harness.expect("Plain answer" in result.stdout, "the turn completes", result)
+    offered = advertised_tools(transcript)
+    harness.expect(offered == [], f"no tool is advertised: {offered}", result)
+
+
+def test_invalid_tools_stop_the_run():
+    """A bad allowlist from the flag or the environment fails before any model call, rather than
+    silently offering every tool."""
+    flag = harness.run_oneshot(
+        "hi", "text never sent\nend-turn\n", extra_args=["--tools=read,grep"]
+    )
+    harness.expect(flag.returncode != 0, "an unknown name in --tools fails the run", flag)
+    harness.expect("unknown tool 'grep'" in flag.stderr, "the error names the tool", flag)
+    harness.expect("never sent" not in flag.stdout, "no model call was made", flag)
+
+    env = harness.run_oneshot(
+        "hi", "text never sent\nend-turn\n", extra_env={"HAX_TOOLS": "raed"}
+    )
+    harness.expect(env.returncode != 0, "an unknown name in HAX_TOOLS fails the run", env)
+    harness.expect("unknown tool 'raed'" in env.stderr, "the error names the tool", env)
+    harness.expect("never sent" not in env.stdout, "no model call was made", env)
 
 
 def test_sigint_then_resume():

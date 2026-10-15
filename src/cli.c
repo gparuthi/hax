@@ -50,6 +50,9 @@ static const struct help_option {
     {"--bare",
      "Run without project and delegation context — no AGENTS.md, skills, or subagents "
      "section. The Environment section, tools, and base system prompt remain (unlike --raw)."},
+    {"--tools=LIST",
+     "Offer only the listed tools, comma-separated (read, edit, write, bash, task_wait), or "
+     "'none'. Overrides the tools setting."},
     {"--provider=NAME", "Select the backend for this run."},
     {"--model=ID", "Select the model for this run."},
     {"--effort=LEVEL", "Select the reasoning effort for this run."},
@@ -160,6 +163,7 @@ enum cli_parse_result cli_parse(int argc, char **argv, struct cli_options *optio
         OPT_BARE,
         OPT_NO_SESSION,
         OPT_JSON,
+        OPT_TOOLS,
     };
     static const struct option long_options[] = {
         {"help", no_argument, NULL, 'h'},
@@ -175,6 +179,7 @@ enum cli_parse_result cli_parse(int argc, char **argv, struct cli_options *optio
         {"model", required_argument, NULL, OPT_MODEL},
         {"effort", required_argument, NULL, OPT_EFFORT},
         {"preset", required_argument, NULL, OPT_PRESET},
+        {"tools", required_argument, NULL, OPT_TOOLS},
         {NULL, 0, NULL, 0},
     };
 
@@ -228,6 +233,9 @@ enum cli_parse_result cli_parse(int argc, char **argv, struct cli_options *optio
         case OPT_PRESET:
             options->selection.preset = optarg;
             break;
+        case OPT_TOOLS:
+            options->tools = optarg;
+            break;
         case OPT_BARE:
             options->bare = 1;
             break;
@@ -263,6 +271,14 @@ enum cli_parse_result cli_parse(int argc, char **argv, struct cli_options *optio
     if (empty_flag) {
         hax_err("%s requires a value", empty_flag);
         return CLI_PARSE_ERROR;
+    }
+    if (options->tools) {
+        char *error = NULL;
+        if (agent_tools_validate(options->tools, &error) != 0) {
+            hax_err("--tools: %s", error);
+            free(error);
+            return CLI_PARSE_ERROR;
+        }
     }
     if (options->resume_mode == CLI_RESUME_SELECT && options->resume_id && !*options->resume_id) {
         hax_err("--resume= requires a session id");

@@ -6,6 +6,7 @@
 #include <curl/curl.h>
 
 #include "agent.h"
+#include "agent_core.h"
 #include "catalog.h"
 #include "cli.h"
 #include "config.h"
@@ -141,6 +142,17 @@ static int apply_run_selection(const struct cli_options *options)
     }
     if (options->no_session)
         config_set_override("no_session", "1");
+    if (options->tools)
+        config_set_override("tools", options->tools);
+
+    /* An allowlist that doesn't parse must stop the run: dropping it would offer every tool. */
+    const char *tools = config_str("tools");
+    char *tools_error = NULL;
+    if (tools && agent_tools_validate(tools, &tools_error) != 0) {
+        hax_err("tools (%s): %s", config_source("tools"), tools_error);
+        free(tools_error);
+        return -1;
+    }
 
     return 0;
 }

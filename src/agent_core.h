@@ -30,6 +30,10 @@ struct hax_opts {
 
 const struct tool *agent_find_tool(const char *name);
 
+/* Check a `tools` allowlist value: comma-separated known tool names, or "none". Returns 0 when
+ * valid; otherwise -1 with a malloc'd message in `*error`. */
+int agent_tools_validate(const char *list, char **error);
+
 /* Return the configured provider id, or the live provider's borrowed name when unset. */
 const char *agent_provider_id(const struct provider *provider);
 

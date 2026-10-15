@@ -861,6 +861,58 @@ static void test_prepare_resumed(void)
     agent_session_free(&session);
 }
 
+static int session_has_tool(const struct agent_session *session, const char *name)
+{
+    for (size_t i = 0; i < session->n_tools; i++) {
+        if (strcmp(session->tools[i].name, name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static void test_session_init_tools_allowlist(void)
+{
+    struct provider p = {.name = "test"};
+    struct hax_opts opts = {0};
+    struct agent_session session;
+
+    setenv("HAX_MODEL", "m", 1);
+    unsetenv("HAX_TOOLS");
+    agent_session_init(&session, &p, &opts);
+    EXPECT(session_has_tool(&session, "read"));
+    EXPECT(session_has_tool(&session, "edit"));
+    EXPECT(session_has_tool(&session, "write"));
+    EXPECT(session_has_tool(&session, "bash"));
+    agent_session_free(&session);
+
+    setenv("HAX_TOOLS", "read,write", 1);
+    agent_session_init(&session, &p, &opts);
+    EXPECT(session.n_tools == 2);
+    EXPECT(session_has_tool(&session, "read"));
+    EXPECT(session_has_tool(&session, "write"));
+    EXPECT(!session_has_tool(&session, "bash"));
+    EXPECT(!session_has_tool(&session, "edit"));
+    agent_session_free(&session);
+
+    setenv("HAX_TOOLS", "none", 1);
+    agent_session_init(&session, &p, &opts);
+    EXPECT(session.n_tools == 0);
+    agent_session_free(&session);
+
+    unsetenv("HAX_TOOLS");
+    unsetenv("HAX_MODEL");
+}
+
+static void test_tools_validate_uses_real_tool_names(void)
+{
+    char *error = NULL;
+    EXPECT(agent_tools_validate("read,edit,write,bash,task_wait", &error) == 0);
+    EXPECT(error == NULL);
+    EXPECT(agent_tools_validate("read,grep", &error) == -1);
+    EXPECT(error != NULL && strstr(error, "grep") != NULL);
+    free(error);
+}
+
 int main(void)
 {
     test_session_append();
@@ -877,6 +929,8 @@ int main(void)
     test_recording_enabled();
     test_session_init_model_label();
     test_session_init_raw();
+    test_session_init_tools_allowlist();
+    test_tools_validate_uses_real_tool_names();
     test_session_init_missing_model();
     test_session_init_missing_provider();
     test_session_add_user();

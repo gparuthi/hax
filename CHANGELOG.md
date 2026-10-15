@@ -7,6 +7,12 @@ notes (see [docs/releasing.md](docs/releasing.md)).
 
 ## [Unreleased]
 
+### Added
+
+- `--tools=LIST` (and the `tools` setting, `HAX_TOOLS`) offers only the named tools, such as
+  `--tools=read,write`, or none with `--tools=none`. Tools left out are not sent to the model and
+  a call to one is refused. It is not a security boundary while `bash` is allowed.
+
 ## [0.6.1] - 2026-10-15
 
 ### Added
