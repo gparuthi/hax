@@ -36,6 +36,7 @@ struct cli_options {
     struct cli_selection selection;
     enum cli_resume_mode resume_mode;
     const char *resume_id; /* borrowed argv value; NULL opens the resume picker */
+    const char *tools;     /* borrowed argv --tools list; NULL leaves the setting alone */
     int first_prompt_arg;
     int one_shot;
     int bare;

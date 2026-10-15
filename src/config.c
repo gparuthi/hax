@@ -48,6 +48,10 @@ static const struct config_setting REGISTRY[] = {
     {.key = "no_tasks", .env_var = "HAX_NO_TASKS", .choices = CONFIG_CHOICES_BOOL,
      .description = "Disable background tasks: bash timeouts kill instead of detaching, and the "
                     "task tools are not offered"},
+    {.key = "tools", .env_var = "HAX_TOOLS",
+     .description = "Offer only these tools (comma-separated: read, edit, write, bash, "
+                    "task_wait; none offers no tools); unset offers all. Not a security "
+                    "boundary while bash is allowed"},
 
     /* display */
     {.key = "markdown", .env_var = "HAX_MARKDOWN", .default_value = "1",

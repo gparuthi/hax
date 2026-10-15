@@ -111,6 +111,34 @@ static void test_unknown_tool(void)
     item_free(&call);
 }
 
+static void test_allowlist_blocks_unlisted_tool(void)
+{
+    setenv("HAX_TOOLS", "read", 1);
+
+    struct item call = make_call("bash", "{\"command\":\"pwd\"}");
+    free(last_args);
+    last_args = NULL;
+    struct agent_tool_call tc;
+    agent_tool_call_init(&tc, &call);
+
+    /* The model asked for a tool the allowlist withheld: it must not run. */
+    EXPECT(tc.tool == NULL);
+    char *output = agent_tool_call_run(&tc, NULL);
+    EXPECT_STR_EQ(output, "unknown tool: bash");
+    EXPECT(last_args == NULL);
+    free(output);
+    agent_tool_call_destroy(&tc);
+    item_free(&call);
+
+    struct item allowed = make_call("read", "{\"path\":\"original\"}");
+    agent_tool_call_init(&tc, &allowed);
+    EXPECT(tc.tool == &TOOL_READ);
+    agent_tool_call_destroy(&tc);
+    item_free(&allowed);
+
+    unsetenv("HAX_TOOLS");
+}
+
 static void test_unmodified_args(void)
 {
     struct item call = make_call("bash", "{\"command\":\"pwd\"}");
@@ -236,6 +264,7 @@ int main(void)
     test_preprocess_run_and_result();
     test_result_make_interrupted_provenance();
     test_unknown_tool();
+    test_allowlist_blocks_unlisted_tool();
     test_unmodified_args();
     test_result_moves_run_context();
     test_image_budget_accepts_result();

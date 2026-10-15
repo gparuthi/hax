@@ -8,6 +8,7 @@
 #include "agent_core.h"
 #include "provider.h"
 #include "tool.h"
+#include "tool_filter.h"
 #include "xalloc.h"
 #include "render/ctrl_strip.h"
 
@@ -17,6 +18,9 @@ void agent_tool_call_init(struct agent_tool_call *tc, const struct item *call)
     tc->original = call;
     tc->effective = *call;
     tc->tool = call->tool_name ? agent_find_tool(call->tool_name) : NULL;
+    /* A tool outside the `tools` allowlist is as unknown as one the model invented. */
+    if (tc->tool && !tool_filter_allows(tc->tool->def.name))
+        tc->tool = NULL;
 
     if (tc->tool && tc->tool->preprocess_args && call->tool_arguments_json)
         tc->owned_args_json = tc->tool->preprocess_args(call->tool_arguments_json);

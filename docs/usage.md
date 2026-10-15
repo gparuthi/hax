@@ -38,6 +38,7 @@ hax --resume=ID -p "continue"    # resume non-interactively
 | `--raw` | Send only the prompt: no system/context sections and no tools. |
 | `--image=PATH` | Attach an image to the one-shot prompt (repeatable). It is sent inline, so it works with `--raw`. |
 | `--bare` | Keep the base prompt, environment, and tools, but omit project/delegation context. |
+| `--tools=LIST` | Offer only the listed tools (`read,edit,write,bash,task_wait`), or `none`. |
 | `--provider=NAME` | Select a provider for this run. |
 | `--model=ID` | Select a model for this run. |
 | `--effort=LEVEL` | Select reasoning effort for this run. |
