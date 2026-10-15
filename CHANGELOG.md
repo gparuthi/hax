@@ -14,6 +14,9 @@ notes (see [docs/releasing.md](docs/releasing.md)).
   the prompt as a draft, arrow keys are dropped, and after Esc the typed text waits as a draft too.
 - `--image=PATH` attaches an image to a `-p` / `--json` prompt, inline in the user message, so a
   tool-less `--raw` run can see it. Repeatable; refused when the model is known not to take images.
+- `--tools=LIST` (and the `tools` setting, `HAX_TOOLS`) offers only the named tools, such as
+  `--tools=read,write`, or none with `--tools=none`. Tools left out are not sent to the model and
+  a call to one is refused. It is not a security boundary while `bash` is allowed.
 
 ## [0.6.1] - 2026-10-15
 

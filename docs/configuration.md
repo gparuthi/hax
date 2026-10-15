@@ -225,6 +225,14 @@ provider-dependent.
 | `no_skills` | `HAX_NO_SKILLS` | off | Omit skill descriptions. |
 | `no_subagents` | `HAX_NO_SUBAGENTS` | off | Omit delegation guidance. |
 | `no_tasks` | `HAX_NO_TASKS` | off | Disable managed background tasks. |
+| `tools` | `HAX_TOOLS` | all | Offer only these tools: comma-separated `read`, `edit`, `write`, `bash`, `task_wait`, or `none`. |
+
+`tools` trims the tool schemas sent to the model and refuses a call to any tool left out, which
+saves tokens and keeps a role from editing files by accident. It is not a security boundary while
+`bash` is allowed, since a shell can do anything the user can. A value that does not parse (a
+misspelled name, `none` mixed with others) stops the run instead of offering every tool. Pair it
+with `no_tasks` and `no_subagents` when `bash` or `task_wait` is left out, so the prompt does not
+describe tools the model does not have.
 
 `(none)` for `system_prompt` is stronger than an empty string: it sends no system message at all.
 `--raw` is usually clearer when the goal is a prompt-only chat with no tools or context.

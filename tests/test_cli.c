@@ -49,6 +49,41 @@ static void test_parse_selection_and_prompt_arguments(void)
     free(prompt);
 }
 
+static void test_parse_tools_flag(void)
+{
+    struct cli_options options;
+
+    char *plain[] = {"hax", "--print", "hi", NULL};
+    EXPECT(cli_parse(3, plain, &options) == CLI_PARSE_OK);
+    EXPECT(options.tools == NULL);
+
+    char *listed[] = {"hax", "--print", "--tools=read,bash", "hi", NULL};
+    EXPECT(cli_parse(4, listed, &options) == CLI_PARSE_OK);
+    EXPECT_STR_EQ(options.tools, "read,bash");
+
+    char *none[] = {"hax", "--print", "--tools=none", "hi", NULL};
+    EXPECT(cli_parse(4, none, &options) == CLI_PARSE_OK);
+    EXPECT_STR_EQ(options.tools, "none");
+
+    char *spaced[] = {"hax", "--print", "--tools", "read", "hi", NULL};
+    EXPECT(cli_parse(5, spaced, &options) == CLI_PARSE_OK);
+    EXPECT_STR_EQ(options.tools, "read");
+}
+
+static void test_parse_rejects_bad_tools(void)
+{
+    struct cli_options options;
+
+    char *unknown[] = {"hax", "--print", "--tools=read,grep", "hi", NULL};
+    EXPECT(cli_parse(4, unknown, &options) == CLI_PARSE_ERROR);
+
+    char *empty[] = {"hax", "--print", "--tools=", "hi", NULL};
+    EXPECT(cli_parse(4, empty, &options) == CLI_PARSE_ERROR);
+
+    char *mixed[] = {"hax", "--print", "--tools=none,read", "hi", NULL};
+    EXPECT(cli_parse(4, mixed, &options) == CLI_PARSE_ERROR);
+}
+
 static void test_parse_resume_modes(void)
 {
     char *latest_argv[] = {"hax", "--continue", NULL};
@@ -433,6 +468,8 @@ int main(void)
     EXPECT(chdir(t_tempdir()) == 0);
     locale_init_utf8();
     test_parse_selection_and_prompt_arguments();
+    test_parse_tools_flag();
+    test_parse_rejects_bad_tools();
     test_parse_resume_modes();
     test_parse_rejects_incompatible_resume_options();
     test_parse_rejects_missing_values_and_interactive_prompt();

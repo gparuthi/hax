@@ -101,6 +101,7 @@ sources = files(
     'src/session_picker.c',
     'src/session_prune.c',
     'src/slash.c',
+    'src/tool_filter.c',
     'src/tool_schema.c',
     'src/trace.c',
     'src/transcript.c',
