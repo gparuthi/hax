@@ -32,6 +32,7 @@ static const struct provider_field PROVIDER_FIELDS[] = {
     {.leaf = "api_key_env",         .classes = PROVIDER_FIELD_UNPINNED},
     {.leaf = "display_name",        .classes = FIELD_ANY},
     {.leaf = "catalog_id",          .classes = FIELD_ANY},
+    {.leaf = "usage_url",           .classes = PROVIDER_FIELD_UNPINNED},
     {.leaf = "sort_models",         .classes = FIELD_ANY},
     {.leaf = "metadata_api",        .classes = FIELD_ANY},
     {.leaf = "model_apis",          .classes = FIELD_ANY},

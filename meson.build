@@ -133,6 +133,7 @@ sources = files(
     'src/providers/stream_retry.c',
     'src/providers/usage_fetch.c',
     'src/providers/usage_render.c',
+    'src/providers/usage_url.c',
     'src/providers/wire.c',
 
     'src/render/ctrl_strip.c',

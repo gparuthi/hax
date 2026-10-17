@@ -330,6 +330,9 @@ different endpoint is a custom provider, not a tweak. Codex is pinned the same w
 credentials come from the ChatGPT login ([`/login`](./providers.md#codex)) rather than a key, so
 `api_key` and `api_key_env` in its block warn and are ignored.
 
+A custom provider can set `usage_url` to make `/usage` print a plain-text report from its endpoint;
+see [Usage report](./providers.md#usage-report).
+
 The shipped `openai-compatible` and `anthropic-compatible` providers are configured the same way —
 through their own `providers.<name>` blocks — and additionally bind environment variables to those
 keys so a one-off endpoint needs no config file.

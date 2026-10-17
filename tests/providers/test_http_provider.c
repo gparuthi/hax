@@ -1078,6 +1078,38 @@ static void test_unsupported_protocol_reported(void)
     provider->destroy(provider);
 }
 
+/* usage_url installs the plain-text /usage hook on unpinned defs; unset, the def's own hook (or
+ * none) stays, and a pinned def ignores the field so its key cannot be redirected. */
+static void test_usage_url_wiring(void)
+{
+    struct provider_def def = {.id = "uw", .base_url = "http://example.invalid/v1"};
+    struct provider *provider = http_provider_new(&def);
+    EXPECT(provider != NULL);
+    if (provider) {
+        EXPECT(provider->query_usage == NULL);
+        EXPECT(http_provider_usage_url(provider) == NULL);
+        provider->destroy(provider);
+    }
+
+    EXPECT(config_load("{\"providers\": {\"uw\": {\"usage_url\": \"usage\"}}}") == 0);
+    provider = http_provider_new(&def);
+    EXPECT(provider != NULL);
+    if (provider) {
+        EXPECT(provider->query_usage != NULL);
+        EXPECT_STR_EQ(http_provider_usage_url(provider), "http://example.invalid/v1/usage");
+        provider->destroy(provider);
+    }
+
+    struct provider_def pinned = {.id = "uw", .base_url = "http://example.invalid/v1", .pinned = 1};
+    provider = http_provider_new(&pinned);
+    EXPECT(provider != NULL);
+    if (provider) {
+        EXPECT(provider->query_usage == NULL);
+        provider->destroy(provider);
+    }
+    EXPECT(config_load(NULL) == 0);
+}
+
 int main(void)
 {
     signal(SIGPIPE, SIG_IGN);
@@ -1098,5 +1130,6 @@ int main(void)
     test_config_only_routing_without_catalog_id();
     test_catalog_routing_warning();
     test_unsupported_protocol_reported();
+    test_usage_url_wiring();
     T_REPORT();
 }
