@@ -21,6 +21,7 @@
 #include "providers/provider_config.h"
 #include "providers/registry.h"
 #include "providers/stream_retry.h"
+#include "providers/usage_url.h"
 #include "providers/wire.h"
 #include "text/placeholder.h"
 #include "text/url.h"
@@ -65,6 +66,7 @@ struct http_provider {
     char *catalog_id;
     char *endpoint; /* for the default wire; other wires derive theirs per request */
     char *config_prefix;
+    char *usage_url;                  /* resolved providers.<id>.usage_url; NULL when unset */
     const struct wire *wire;          /* default; wire_rules and catalog hints override per model */
     const struct wire *metadata_wire; /* auth scheme for /models and probe requests */
     struct wire_rule *wire_rules;
@@ -472,6 +474,7 @@ static void http_provider_destroy(struct provider *base)
     free(provider->catalog_id);
     free(provider->endpoint);
     free(provider->config_prefix);
+    free(provider->usage_url);
     free(provider->version);
     free(provider->cache_ttl);
     free(provider->reasoning_field);
@@ -597,6 +600,11 @@ static size_t http_provider_list_efforts(struct provider *base, const char *cons
 const char *http_provider_base_url(const struct provider *provider)
 {
     return ((const struct http_provider *)provider)->base_url;
+}
+
+const char *http_provider_usage_url(const struct provider *provider)
+{
+    return ((const struct http_provider *)provider)->usage_url;
 }
 
 int http_provider_has_api_key(const struct provider *provider)
@@ -1036,6 +1044,14 @@ struct provider *http_provider_new(const struct provider_def *def)
     }
     if (def->query_usage)
         provider->base.query_usage = def->query_usage;
+    /* Only a def whose credential config may already redirect (an unpinned static key) takes a
+     * configured usage endpoint. */
+    int takes_usage_url = !def->pinned && !def->auth_source;
+    const char *usage_url = takes_usage_url ? config_scoped_str(prefix, "usage_url") : NULL;
+    if (usage_url && *usage_url) {
+        provider->usage_url = usage_url_resolve(provider->base_url, usage_url);
+        provider->base.query_usage = usage_url_query;
+    }
     if (def->model_label)
         provider->base.model_label = def->model_label;
     provider->base.list_efforts = http_provider_list_efforts;

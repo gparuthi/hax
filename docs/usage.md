@@ -97,7 +97,7 @@ Type `/help` for the authoritative live list.
 | `/copy` | Copy the latest assistant response. |
 | `/tasks [kill <id>... \| kill all]` | List or stop background tasks. |
 | `/session` | Show the session's selection and usage totals. |
-| `/usage` | Query provider account/subscription usage when supported. |
+| `/usage` | Query provider account/subscription usage when supported; a custom provider opts in with [`usage_url`](./providers.md#usage-report). |
 | `/login [provider]` | Log in to a provider account with a hax-managed token (ChatGPT/codex). |
 | `/logout [provider]` | Revoke and remove a hax-managed login. |
 
