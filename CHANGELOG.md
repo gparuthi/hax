@@ -9,6 +9,9 @@ notes (see [docs/releasing.md](docs/releasing.md)).
 
 ### Added
 
+- `usage_url` provider setting: a custom provider can serve a plain-text `/usage` report. Hax
+  fetches the URL, relative to `base_url` or absolute, with the provider's credentials and
+  `extra_headers`, and prints the response. See [docs/providers.md](docs/providers.md#usage-report).
 - Keys typed while hax is working are kept and replayed into the next prompt instead of being
   discarded, so a message typed with Enter during a turn is sent when the turn ends. Pastes wait in
   the prompt as a draft, arrow keys are dropped, and after Esc the typed text waits as a draft too.

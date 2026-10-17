@@ -61,6 +61,9 @@ void http_provider_availability(const struct provider_def *def, struct provider_
 
 /* Accessors for hook modules implementing their own metadata callbacks. */
 const char *http_provider_base_url(const struct provider *provider);
+/* The resolved providers.<id>.usage_url, or NULL when unset; borrowed for the provider's
+ * lifetime. */
+const char *http_provider_usage_url(const struct provider *provider);
 int http_provider_has_api_key(const struct provider *provider);
 /* The resolved key, or NULL; borrowed for the provider's lifetime. */
 const char *http_provider_api_key(const struct provider *provider);

@@ -262,6 +262,7 @@ Common fields:
 | `sort_models` | Sort this provider's model picker newest-first (default); `off` keeps server order. |
 | `catalog_id` | Provider id in models.dev for cost/context metadata; unset means none. |
 | `metadata_api` | `/models` dialect: `openai` (flat list) or `anthropic` (paginated); defaults to the request protocol's family. |
+| `usage_url` | Plain-text report served by `/usage` ([below](#usage-report)). |
 | `extra_body` | Raw JSON members merged into every request body ([below](#request-passthrough)). |
 | `extra_headers` | HTTP headers sent on every request ([below](#request-passthrough)). |
 | `overflow_phrases` | Phrases in this provider's error messages that mean the conversation exceeds the model's context window, for servers whose wording hax does not already recognize. |
@@ -331,6 +332,26 @@ back to budget thinking. Override `thinking_mode` or `cache` when an endpoint ne
 For authentication, set `HAX_OPENAI_API_KEY` or `HAX_ANTHROPIC_API_KEY`; hax does not fall back to
 `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. The `HAX_OPENAI_*` and `HAX_ANTHROPIC_*` variables
 configure only these two providers.
+
+### Usage report
+
+`usage_url` gives a custom provider a `/usage` report. Hax sends a GET to the URL with the
+provider's usual authentication and its `extra_headers`, and prints the plain-text response under
+the provider's name. A relative value such as `"usage"` resolves against `base_url`; an absolute
+`http://` or `https://` URL is used as is. The request times out after 5 seconds; a non-2xx status
+or a transport failure prints a one-line error. Without `usage_url`, `/usage` is unsupported for a
+custom provider. A shipped provider with a pinned endpoint ignores the field with a warning.
+
+```json
+{
+  "providers": {
+    "gateway": {
+      "base_url": "https://gateway.example.com/v1",
+      "usage_url": "usage"
+    }
+  }
+}
+```
 
 ### Request passthrough
 
