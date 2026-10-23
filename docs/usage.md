@@ -125,6 +125,7 @@ The editor supports common readline-style movement and history keys. Notable hax
 | Ctrl-D | Quit on an empty prompt. |
 | Ctrl-L | Clear the screen and redraw the prompt. |
 | Ctrl-G | Edit the prompt in `$EDITOR`. |
+| Ctrl-_ | Undo the last edit to the prompt; most terminals send it for Ctrl-/ and Ctrl-- too. |
 | Ctrl-O | Open the rendered conversation in `$PAGER`. |
 | Ctrl-T | Open the model-facing transcript in `$PAGER`. |
 | Ctrl-V | Paste an image, or clipboard text when no image is available. |

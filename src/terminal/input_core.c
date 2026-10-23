@@ -18,6 +18,7 @@ struct input *input_new(void)
     in->buf = xmalloc(64);
     in->cap = 64;
     in->buf[0] = '\0';
+    input_core_undo_reset(in);
     return in;
 }
 
@@ -34,6 +35,10 @@ void input_free(struct input *in)
     free(in->preseed);
     free(in->empty_placeholder);
     free(in->candidates);
+    for (size_t i = 0; i < in->undo_n; i++)
+        free(in->undo[i].text);
+    free(in->undo);
+    free(in->undo_tip.text);
     free(in);
 }
 
@@ -290,6 +295,87 @@ void input_core_kill_word_fwd(struct input *in)
 {
     size_t e = scan_alnum_right(in->buf, in->len, in->cursor);
     buf_erase(in, in->cursor, e - in->cursor);
+}
+
+/* ---------------- undo ---------------- */
+
+static void undo_step_capture(struct input_undo_step *step, const struct input *in)
+{
+    free(step->text);
+    step->text = xmalloc(in->len + 1);
+    memcpy(step->text, in->buf, in->len + 1);
+    step->len = in->len;
+    step->cursor = in->cursor;
+}
+
+static void undo_drop_oldest(struct input *in)
+{
+    in->undo_bytes -= in->undo[0].len;
+    free(in->undo[0].text);
+    memmove(&in->undo[0], &in->undo[1], (in->undo_n - 1) * sizeof(in->undo[0]));
+    in->undo_n--;
+}
+
+/* Take ownership of the tip's text as the newest step. */
+static void undo_push_tip(struct input *in)
+{
+    if (in->undo_n + 1 > in->undo_cap) {
+        in->undo_cap = in->undo_cap ? in->undo_cap * 2 : 16;
+        in->undo = xrealloc(in->undo, in->undo_cap * sizeof(in->undo[0]));
+    }
+    in->undo[in->undo_n++] = in->undo_tip;
+    in->undo_bytes += in->undo_tip.len;
+    in->undo_tip.text = NULL;
+    /* Keep the newest step even when it alone exceeds the byte cap. */
+    while (in->undo_n > INPUT_CORE_UNDO_MAX ||
+           (in->undo_n > 1 && in->undo_bytes > INPUT_CORE_UNDO_BYTES_MAX))
+        undo_drop_oldest(in);
+}
+
+void input_core_undo_reset(struct input *in)
+{
+    for (size_t i = 0; i < in->undo_n; i++)
+        free(in->undo[i].text);
+    in->undo_n = 0;
+    in->undo_bytes = 0;
+    in->undo_typing = 0;
+    undo_step_capture(&in->undo_tip, in);
+}
+
+static int starts_word(const struct input *in, size_t at)
+{
+    return at > 0 && at < in->len && isspace((unsigned char)in->buf[at - 1]) &&
+           !isspace((unsigned char)in->buf[at]);
+}
+
+void input_core_undo_record(struct input *in, int typed)
+{
+    struct input_undo_step *tip = &in->undo_tip;
+
+    if (in->len == tip->len && memcmp(in->buf, tip->text, in->len) == 0) {
+        tip->cursor = in->cursor;
+        if (!typed)
+            in->undo_typing = 0;
+        return;
+    }
+    /* For a typed key, the tip's cursor is where its text went in. */
+    if (!typed || !in->undo_typing || starts_word(in, tip->cursor))
+        undo_push_tip(in);
+    in->undo_typing = typed;
+    undo_step_capture(tip, in);
+}
+
+void input_core_undo(struct input *in)
+{
+    if (in->undo_n == 0)
+        return;
+    struct input_undo_step step = in->undo[--in->undo_n];
+    in->undo_bytes -= step.len;
+    input_core_set_buffer(in, step.text);
+    in->cursor = step.cursor;
+    free(in->undo_tip.text);
+    in->undo_tip = step;
+    in->undo_typing = 0;
 }
 
 /* ---------------- history ---------------- */

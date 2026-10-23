@@ -1356,6 +1356,7 @@ char *input_readline(struct input *in, const char *prompt)
         free(in->preseed);
         in->preseed = NULL;
     }
+    input_core_undo_reset(in);
     in->hist_pos = in->hist_n;
     free(in->draft);
     in->draft = NULL;
@@ -1393,6 +1394,7 @@ char *input_readline(struct input *in, const char *prompt)
             in->last_key_was_tab = 0;
         clear_candidates(in);
 
+        int typed = 0;
         switch (c) {
         case 0x01: /* Ctrl-A */
             in->cursor = input_core_line_start(in);
@@ -1481,6 +1483,9 @@ char *input_readline(struct input *in, const char *prompt)
         case 0x1b: /* ESC — start of escape sequence */
             handle_escape_sequence(in);
             break;
+        case 0x1f: /* Ctrl-_ — undo; most terminals send it for Ctrl-/ and Ctrl-- too */
+            input_core_undo(in);
+            break;
         default:
             if (c >= 0x20) {
                 /* Time out malformed leaders because raw mode would consume Ctrl-C/D as
@@ -1495,12 +1500,14 @@ char *input_readline(struct input *in, const char *prompt)
                     bytes[bytes_read++] = (char)byte;
                 }
                 input_core_insert(in, bytes, bytes_read);
+                typed = 1;
             } else {
                 /* Built-in editing keys take precedence over application bindings. */
                 run_modal_key(in, c);
             }
             break;
         }
+        input_core_undo_record(in, typed);
 
         if (!eof && !submit)
             paint(in);

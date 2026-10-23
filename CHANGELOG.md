@@ -7,6 +7,12 @@ notes (see [docs/releasing.md](docs/releasing.md)).
 
 ## [Unreleased]
 
+### Added
+
+- Ctrl-_ (Ctrl-/ or Ctrl-- in most terminals) undoes the last edit to the prompt, restoring the
+  text and cursor. Typing undoes a word at a time; a kill, paste, history recall, or `$EDITOR`
+  edit undoes in one step. Each new prompt starts with nothing to undo.
+
 ## [0.6.1] - 2026-10-15
 
 ### Added

@@ -94,6 +94,17 @@ struct input {
     int exit_armed;
 
     char *preseed; /* owned; consumed by the next input_readline */
+
+    /* Undo steps, oldest first, each the buffer and cursor from before one edit. */
+    struct input_undo_step {
+        char *text; /* owned */
+        size_t len;
+        size_t cursor;
+    } *undo;
+    size_t undo_n, undo_cap;
+    size_t undo_bytes;               /* text bytes held by `undo` */
+    struct input_undo_step undo_tip; /* the buffer as of the last recorded key */
+    int undo_typing;                 /* the newest step is a typing run that can still grow */
 };
 
 /* Result of input_core_compute_layout. All fields are 0-indexed offsets
@@ -138,6 +149,22 @@ void input_core_kill_to_bol(struct input *in);
 void input_core_kill_word_back(struct input *in);
 void input_core_kill_word_back_alnum(struct input *in);
 void input_core_kill_word_fwd(struct input *in);
+
+/* ---- undo ---- */
+
+/* Drop every undo step and take the current buffer as the oldest state. */
+void input_core_undo_reset(struct input *in);
+
+/* Call after each key. When the key changed the buffer, record the state before it as an undo
+ * step. Consecutive `typed` keys share one step until a word starts, so undo removes the last
+ * word typed; any other key ends the run. The oldest steps are evicted past the caps below. */
+void input_core_undo_record(struct input *in, int typed);
+
+/* Restore the buffer and cursor from before the newest step; no-op when there is none. */
+void input_core_undo(struct input *in);
+
+#define INPUT_CORE_UNDO_MAX       256
+#define INPUT_CORE_UNDO_BYTES_MAX (4u << 20)
 
 /* ---- history ---- */
 void input_core_history_prev(struct input *in);
