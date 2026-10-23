@@ -750,6 +750,137 @@ static void test_kill_to_bol(void)
     input_free(in);
 }
 
+/* Feed `text` as typed keys, one byte each, the way input_readline records them. */
+static void type_keys(struct input *in, const char *text)
+{
+    for (const char *key = text; *key; key++) {
+        input_core_insert(in, key, 1);
+        input_core_undo_record(in, 1);
+    }
+}
+
+static void test_undo_groups_typing_by_word(void)
+{
+    struct input *in = input_new();
+    type_keys(in, "hello world");
+
+    input_core_undo(in);
+    input_core_undo_record(in, 0);
+    EXPECT_STR_EQ(in->buf, "hello ");
+    EXPECT(in->cursor == 6);
+
+    input_core_undo(in);
+    input_core_undo_record(in, 0);
+    EXPECT_STR_EQ(in->buf, "");
+    EXPECT(in->cursor == 0);
+    input_free(in);
+}
+
+static void test_undo_kill_restores_text_and_cursor(void)
+{
+    struct input *in = new_with("hello world");
+    input_core_undo_reset(in);
+    in->cursor = 5;
+    input_core_undo_record(in, 0);
+
+    input_core_kill_to_eol(in);
+    input_core_undo_record(in, 0);
+    EXPECT_STR_EQ(in->buf, "hello");
+
+    input_core_undo(in);
+    EXPECT_STR_EQ(in->buf, "hello world");
+    EXPECT(in->cursor == 5);
+    input_free(in);
+}
+
+static void test_undo_steps_back_through_edits(void)
+{
+    struct input *in = input_new();
+    type_keys(in, "foo");
+    input_core_kill_word_back(in);
+    input_core_undo_record(in, 0);
+    type_keys(in, "bar");
+    EXPECT_STR_EQ(in->buf, "bar");
+
+    input_core_undo(in);
+    input_core_undo_record(in, 0);
+    EXPECT_STR_EQ(in->buf, "");
+    input_core_undo(in);
+    input_core_undo_record(in, 0);
+    EXPECT_STR_EQ(in->buf, "foo");
+    EXPECT(in->cursor == 3);
+    input_core_undo(in);
+    input_core_undo_record(in, 0);
+    EXPECT_STR_EQ(in->buf, "");
+    EXPECT(in->undo_n == 0);
+    input_free(in);
+}
+
+static void test_undo_motion_ends_typing_run(void)
+{
+    struct input *in = input_new();
+    type_keys(in, "ab");
+    input_core_move_left(in);
+    input_core_undo_record(in, 0);
+    type_keys(in, "x");
+    EXPECT_STR_EQ(in->buf, "axb");
+
+    input_core_undo(in);
+    input_core_undo_record(in, 0);
+    EXPECT_STR_EQ(in->buf, "ab");
+    EXPECT(in->cursor == 1);
+
+    /* Typing after an undo opens a new step rather than extending an old run. */
+    type_keys(in, "y");
+    input_core_undo(in);
+    EXPECT_STR_EQ(in->buf, "ab");
+    input_free(in);
+}
+
+static void test_undo_without_steps_is_noop(void)
+{
+    struct input *in = new_with("seed");
+    input_core_undo_reset(in);
+    in->cursor = 2;
+    input_core_undo(in);
+    input_core_undo_record(in, 0);
+    EXPECT_STR_EQ(in->buf, "seed");
+    EXPECT(in->cursor == 2);
+    EXPECT(in->undo_n == 0);
+
+    type_keys(in, "x");
+    input_core_undo_reset(in);
+    input_core_undo(in);
+    EXPECT_STR_EQ(in->buf, "sexed");
+    input_free(in);
+}
+
+static void test_undo_is_bounded(void)
+{
+    struct input *in = input_new();
+    for (int i = 0; i < INPUT_CORE_UNDO_MAX + 10; i++) {
+        input_core_insert(in, "\n", 1);
+        input_core_undo_record(in, 0);
+    }
+    EXPECT(in->undo_n == INPUT_CORE_UNDO_MAX);
+
+    size_t chunk_len = INPUT_CORE_UNDO_BYTES_MAX / 4;
+    char *chunk = xmalloc(chunk_len + 1);
+    chunk[chunk_len] = '\0';
+    for (int i = 0; i < 8; i++) {
+        memset(chunk, i % 2 ? 'q' : 'p', chunk_len);
+        input_core_set_buffer(in, chunk);
+        input_core_undo_record(in, 0);
+    }
+    EXPECT(in->undo_bytes <= INPUT_CORE_UNDO_BYTES_MAX);
+    EXPECT(in->undo_n == 4);
+
+    input_core_undo(in);
+    EXPECT(in->len == chunk_len && in->buf[0] == 'p');
+    free(chunk);
+    input_free(in);
+}
+
 static void test_history_empty(void)
 {
     struct input *in = input_new();
@@ -1238,6 +1369,13 @@ int main(void)
     test_kill_to_eol_joins_empty_line();
     test_kill_to_eol_at_buffer_end();
     test_kill_to_bol();
+
+    test_undo_groups_typing_by_word();
+    test_undo_kill_restores_text_and_cursor();
+    test_undo_steps_back_through_edits();
+    test_undo_motion_ends_typing_run();
+    test_undo_without_steps_is_noop();
+    test_undo_is_bounded();
 
     test_history_empty();
     test_history_navigation();

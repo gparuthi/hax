@@ -20,6 +20,9 @@ notes (see [docs/releasing.md](docs/releasing.md)).
 - `--tools=LIST` (and the `tools` setting, `HAX_TOOLS`) offers only the named tools, such as
   `--tools=read,write`, or none with `--tools=none`. Tools left out are not sent to the model and
   a call to one is refused. It is not a security boundary while `bash` is allowed.
+- Ctrl-_ (Ctrl-/ or Ctrl-- in most terminals) undoes the last edit to the prompt, restoring the
+  text and cursor. Typing undoes a word at a time; a kill, paste, history recall, or `$EDITOR`
+  edit undoes in one step. Each new prompt starts with nothing to undo.
 
 ## [0.6.1] - 2026-10-15
 
