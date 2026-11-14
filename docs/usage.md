@@ -32,6 +32,7 @@ hax --resume=ID -p "continue"    # resume non-interactively
 | --- | --- |
 | `-p`, `--print` | Run to completion and print the final assistant message to stdout. |
 | `--json` | One-shot (implies `-p`) with stdout as JSON-line conversation records, closed by a `result` record. |
+| `--json-deltas` | With `--json`, also stream the assistant's text live as `text_delta` / `text_reset` lines ([sessions.md](./sessions.md#live-text---json-deltas)). |
 | `-c`, `--continue` | Resume the newest session for the current directory. |
 | `--resume[=ID]` | Pick a session, or resume an id/unique prefix. The id form works with `-p`; without a prompt it continues the run. |
 | `--no-session` | Do not record this run or add its prompts to persistent recall. |

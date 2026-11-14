@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "agent_core.h"
+#include "buf.h"
 #include "config.h"
 #include "harness.h"
 #include "oneshot.h"
@@ -242,6 +243,134 @@ static void test_json_reports_provider_error(void)
         EXPECT(json_object_get(last, "text") == NULL);
         json_decref(last);
     }
+    captured_run_free(&run);
+}
+
+static int delta_stream_calls;
+
+/* Round 1 says something, then calls a tool; round 2 dies mid-stream once and re-streams the
+ * answer, the last character split across two deltas. */
+static int delta_stream(struct provider *provider, const struct context *context, const char *model,
+                        stream_cb callback, void *user, http_tick_cb tick, void *tick_user)
+{
+    (void)provider;
+    (void)context;
+    (void)model;
+    (void)tick;
+    (void)tick_user;
+
+    struct stream_usage usage = {.input_tokens = -1,
+                                 .output_tokens = -1,
+                                 .cached_tokens = -1,
+                                 .cache_write_tokens = -1,
+                                 .cache_write_1h_tokens = -1,
+                                 .cost = -1};
+    struct stream_event tool_round[] = {
+        {.kind = EV_TEXT_DELTA, .u.text_delta = {.text = "Let me "}},
+        {.kind = EV_TEXT_DELTA, .u.text_delta = {.text = "look"}},
+        {.kind = EV_TOOL_CALL_START, .u.tool_call_start = {.id = "call-1", .name = "bash"}},
+        {.kind = EV_TOOL_CALL_DELTA, .u.tool_call_delta = {.id = "call-1", .args_delta = "{}"}},
+        {.kind = EV_TOOL_CALL_END, .u.tool_call_end = {.id = "call-1"}},
+        {.kind = EV_DONE, .u.done = {.stop_reason = "tool_use", .usage = usage}},
+    };
+    struct stream_event answer_round[] = {
+        {.kind = EV_TEXT_DELTA, .u.text_delta = {.text = "Hel"}},
+        {.kind = EV_TEXT_DELTA, .u.text_delta = {.text = "lo "}},
+        {.kind = EV_RETRY, .u.retry = {.attempt = 1, .max_attempts = 3}},
+        {.kind = EV_TEXT_DELTA, .u.text_delta = {.text = "Hello"}},
+        {.kind = EV_TEXT_DELTA, .u.text_delta = {.text = " caf"}},
+        {.kind = EV_TEXT_DELTA, .u.text_delta = {.text = "\xc3"}},
+        {.kind = EV_TEXT_DELTA, .u.text_delta = {.text = "\xa9"}},
+        {.kind = EV_DONE, .u.done = {.stop_reason = "end_turn", .usage = usage}},
+    };
+    struct stream_event *events = delta_stream_calls++ == 0 ? tool_round : answer_round;
+    size_t count = events == tool_round ? sizeof(tool_round) / sizeof(*tool_round)
+                                        : sizeof(answer_round) / sizeof(*answer_round);
+    for (size_t i = 0; i < count; i++)
+        if (callback(&events[i], user))
+            return -1;
+    return 0;
+}
+
+static const char *record_type(json_t *record)
+{
+    const char *type = json_string_value(json_object_get(record, "type"));
+    return type ? type : "";
+}
+
+/* --json-deltas interleaves live text with the records: a reset opens every round and follows
+ * a retry, and the text after the last reset is the answer. */
+static void test_json_deltas_stream_live_text(void)
+{
+    configure_test_run();
+    struct provider provider = {
+        .name = "test-provider",
+        .default_model = "unused",
+        .stream = delta_stream,
+    };
+
+    delta_stream_calls = 0;
+    struct hax_opts options = {.raw = 1, .json = 1, .json_deltas = 1};
+    struct captured_run run = capture_run(&provider, "hello", &options);
+    EXPECT(run.result == 0);
+    EXPECT(delta_stream_calls == 2);
+
+    struct buf shown;
+    buf_init(&shown);
+    int resets = 0;
+    int deltas_after_last_reset = 0;
+    int saw_round_one_text = 0;
+    int delta_before_reset = 0;
+    int delta_after_answer = 0;
+    int saw_answer_item = 0;
+    char *save = NULL;
+    for (char *line = strtok_r(run.out, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+        json_t *record = json_loads(line, 0, NULL);
+        EXPECT(json_is_object(record));
+        if (!record)
+            continue;
+        const char *type = record_type(record);
+        const char *kind = json_string_value(json_object_get(record, "kind"));
+        const char *item_text = json_string_value(json_object_get(record, "text"));
+        if (strcmp(type, "text_reset") == 0) {
+            EXPECT(json_object_size(record) == 1);
+            if (shown.len > 0 && strstr(shown.data, "Let me look"))
+                saw_round_one_text = 1;
+            buf_reset(&shown);
+            deltas_after_last_reset = 0;
+            resets++;
+        } else if (strcmp(type, "text_delta") == 0) {
+            if (resets == 0)
+                delta_before_reset = 1;
+            if (saw_answer_item)
+                delta_after_answer = 1;
+            buf_append_str(&shown, item_text ? item_text : "");
+            deltas_after_last_reset++;
+        } else if (kind && strcmp(kind, "assistant") == 0 && item_text &&
+                   strcmp(item_text, "Hello café") == 0) {
+            saw_answer_item = 1;
+        }
+        json_decref(record);
+    }
+    /* Round 1, round 2, and the retry inside round 2. */
+    EXPECT(resets == 3);
+    EXPECT(saw_round_one_text);
+    EXPECT(!delta_before_reset);
+    EXPECT(!delta_after_answer);
+    EXPECT(saw_answer_item);
+    EXPECT_STR_EQ(shown.data ? shown.data : "", "Hello café");
+    /* Four back-to-back deltas coalesce: at most the first goes out on its own. */
+    EXPECT(deltas_after_last_reset >= 1 && deltas_after_last_reset <= 2);
+    buf_free(&shown);
+    captured_run_free(&run);
+
+    /* Without the flag the stream carries no delta lines. */
+    delta_stream_calls = 0;
+    struct hax_opts plain = {.raw = 1, .json = 1};
+    run = capture_run(&provider, "hello", &plain);
+    EXPECT(run.result == 0);
+    EXPECT(strstr(run.out, "text_delta") == NULL);
+    EXPECT(strstr(run.out, "text_reset") == NULL);
     captured_run_free(&run);
 }
 
@@ -696,6 +825,7 @@ int main(void)
     test_final_messages_are_pipeable();
     test_json_streams_records_and_result();
     test_json_reports_provider_error();
+    test_json_deltas_stream_live_text();
     test_json_write_failure_fails_the_run();
     test_plain_write_failure_fails_the_run();
     test_sigint_interrupts_gracefully();

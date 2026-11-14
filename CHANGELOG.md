@@ -20,6 +20,10 @@ notes (see [docs/releasing.md](docs/releasing.md)).
 - `--tools=LIST` (and the `tools` setting, `HAX_TOOLS`) offers only the named tools, such as
   `--tools=read,write`, or none with `--tools=none`. Tools left out are not sent to the model and
   a call to one is refused. It is not a security boundary while `bash` is allowed.
+- `--json-deltas` adds the assistant's text to the `--json` stream as it is generated:
+  `text_delta` lines (coalesced to ~50 ms) and a `text_reset` at the start of every model round and
+  on a retry. They are never session items; without the flag the stream is unchanged. See
+  [docs/sessions.md](docs/sessions.md#live-text---json-deltas).
 - Ctrl-_ (Ctrl-/ or Ctrl-- in most terminals) undoes the last edit to the prompt, restoring the
   text and cursor. Typing undoes a word at a time; a kill, paste, history recall, or `$EDITOR`
   edit undoes in one step. Each new prompt starts with nothing to undo.
