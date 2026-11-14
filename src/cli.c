@@ -37,6 +37,9 @@ static const struct help_option {
     {"--json",
      "Non-interactive JSON output (implies -p): stream the run as JSON records on stdout, "
      "one per line, ending with a result record. Format reference: hax-sessions(5)."},
+    {"--json-deltas",
+     "With --json, also stream the assistant's text as it is generated (text_delta and "
+     "text_reset lines). Format reference: hax-sessions(5)."},
     {"-c, --continue", "Resume the most recent conversation in this directory."},
     {"--resume[=ID]",
      "Resume a past conversation in this directory, restoring its recorded settings: pick "
@@ -167,6 +170,7 @@ enum cli_parse_result cli_parse(int argc, char **argv, struct cli_options *optio
         OPT_BARE,
         OPT_NO_SESSION,
         OPT_JSON,
+        OPT_JSON_DELTAS,
         OPT_IMAGE,
         OPT_TOOLS,
     };
@@ -178,6 +182,7 @@ enum cli_parse_result cli_parse(int argc, char **argv, struct cli_options *optio
         {"resume", optional_argument, NULL, OPT_RESUME},
         {"no-session", no_argument, NULL, OPT_NO_SESSION},
         {"json", no_argument, NULL, OPT_JSON},
+        {"json-deltas", no_argument, NULL, OPT_JSON_DELTAS},
         {"raw", no_argument, NULL, OPT_RAW},
         {"bare", no_argument, NULL, OPT_BARE},
         {"image", required_argument, NULL, OPT_IMAGE},
@@ -252,6 +257,9 @@ enum cli_parse_result cli_parse(int argc, char **argv, struct cli_options *optio
             options->agent_options.json = 1;
             options->one_shot = 1;
             break;
+        case OPT_JSON_DELTAS:
+            options->agent_options.json_deltas = 1;
+            break;
         case OPT_IMAGE: {
             struct hax_opts *agent = &options->agent_options;
             if (!*optarg) {
@@ -305,6 +313,10 @@ enum cli_parse_result cli_parse(int argc, char **argv, struct cli_options *optio
     }
     if (options->one_shot && options->resume_mode == CLI_RESUME_SELECT && !options->resume_id) {
         hax_err("-p with --resume requires a session id (e.g. --resume=ID)");
+        return CLI_PARSE_ERROR;
+    }
+    if (options->agent_options.json_deltas && !options->agent_options.json) {
+        hax_err("--json-deltas requires --json");
         return CLI_PARSE_ERROR;
     }
     if (options->agent_options.n_image_paths > 0 && !options->one_shot) {

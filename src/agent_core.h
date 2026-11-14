@@ -27,6 +27,7 @@ struct hax_opts {
     const char *resume_path;   /* borrowed session path; NULL starts a new session */
     int provider_autoselected; /* show the one-shot provider-selection banner */
     int json;                  /* one-shot: stream conversation records as JSONL on stdout */
+    int json_deltas;           /* with json: also stream live text_delta/text_reset lines */
     /* one-shot: borrowed image paths attached to the prompt's user message */
     const char *image_paths[IMAGE_REQUEST_MAX_COUNT];
     size_t n_image_paths;

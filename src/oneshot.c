@@ -32,6 +32,9 @@
 /* 128 + SIGINT, the shell convention for an interrupted command. */
 #define ONESHOT_EXIT_INTERRUPTED 130
 
+/* --json-deltas coalesces streamed text to at most one text_delta line per interval. */
+#define DELTA_COALESCE_MS 50
+
 struct oneshot_state {
     struct provider *provider;
     struct agent_session session;
@@ -42,9 +45,12 @@ struct oneshot_state {
     size_t run_from_retired;
     long started_ms;
     long context_tokens;
-    int json;           /* stream conversation records as JSONL on stdout */
-    size_t json_cursor; /* session items already streamed */
-    int json_errno;     /* first stream-write failure; 0 while the stream is healthy */
+    int json;              /* stream conversation records as JSONL on stdout */
+    size_t json_cursor;    /* session items already streamed */
+    int json_errno;        /* first stream-write failure; 0 while the stream is healthy */
+    int json_deltas;       /* also stream live text_delta / text_reset lines */
+    struct buf delta_text; /* streamed text not yet written as a text_delta line */
+    long delta_flushed_ms; /* when the last text_delta line was written */
     /* --image parts loaded at startup, owned until moved onto the prompt's user message */
     struct item_image *images;
     size_t n_images;
@@ -127,15 +133,107 @@ static void emit_json_items(struct oneshot_state *state)
         emit_json_record(state, item_to_json(&state->session.items[state->json_cursor++]));
 }
 
+/* Bytes of text that end on a whole UTF-8 sequence: a delta split mid-character keeps the
+ * partial tail pending, because a JSON string must be valid UTF-8. */
+static size_t utf8_whole_prefix(const char *text, size_t len)
+{
+    size_t start = len;
+    for (size_t back = 0; back < 4 && start > 0; back++) {
+        unsigned char byte = (unsigned char)text[start - 1];
+        if ((byte & 0xC0) != 0x80) {
+            size_t need = byte >= 0xF0 ? 4 : byte >= 0xE0 ? 3 : byte >= 0xC0 ? 2 : 1;
+            return len - (start - 1) >= need ? len : start - 1;
+        }
+        start--;
+    }
+    return len;
+}
+
+static void flush_text_delta(struct oneshot_state *state)
+{
+    size_t whole = utf8_whole_prefix(state->delta_text.data, state->delta_text.len);
+    if (whole == 0)
+        return;
+    json_t *text = json_stringn(state->delta_text.data, whole);
+    if (text) {
+        json_t *record = json_object();
+        json_object_set_new(record, "type", json_string("text_delta"));
+        json_object_set_new(record, "text", text);
+        emit_json_record(state, record);
+    }
+    /* Invalid bytes are dropped: the assistant record still carries the full text. */
+    size_t rest = state->delta_text.len - whole;
+    memmove(state->delta_text.data, state->delta_text.data + whole, rest);
+    state->delta_text.len = rest;
+    state->delta_text.data[rest] = '\0';
+    state->delta_flushed_ms = monotonic_ms();
+}
+
+static void flush_text_delta_if_due(struct oneshot_state *state)
+{
+    if (state->delta_text.len > 0 && monotonic_ms() - state->delta_flushed_ms >= DELTA_COALESCE_MS)
+        flush_text_delta(state);
+}
+
+/* Text streamed so far belongs to a round that ended or is being re-streamed: the consumer
+ * drops what it has shown, since the round's answer arrives again (or turned into tool calls). */
+static void emit_text_reset(struct oneshot_state *state)
+{
+    buf_reset(&state->delta_text);
+    json_t *record = json_object();
+    json_object_set_new(record, "type", json_string("text_reset"));
+    emit_json_record(state, record);
+}
+
+/* --json-deltas stream observer: live text only, never session items. */
+static int json_delta_observe(const struct stream_event *ev, void *user)
+{
+    struct oneshot_state *state = user;
+
+    switch (ev->kind) {
+    case EV_TEXT_DELTA:
+        if (ev->u.text_delta.text)
+            buf_append_str(&state->delta_text, ev->u.text_delta.text);
+        flush_text_delta_if_due(state);
+        break;
+    case EV_RETRY:
+        emit_text_reset(state);
+        break;
+    case EV_DONE:
+    case EV_ERROR:
+        if (state->delta_text.len > 0)
+            flush_text_delta(state);
+        break;
+    default:
+        break;
+    }
+    return 0;
+}
+
 static void json_turn_begin(void *user)
 {
-    emit_json_items(user);
+    struct oneshot_state *state = user;
+
+    emit_json_items(state);
+    if (state->json_deltas)
+        emit_text_reset(state);
 }
 
 static void json_tool_seen(const struct item *call, void *user)
 {
     (void)call;
     emit_json_items(user);
+}
+
+/* Provider tick hook for the turn's requests: the same stop rule as oneshot_poll, and a
+ * stalled stream must not hold back text already received. */
+static enum agent_signal loop_poll(void *user)
+{
+    struct oneshot_state *state = user;
+
+    if (state->json_deltas)
+        flush_text_delta_if_due(state);
+    return agent_interrupt_signal();
 }
 
 /* Seams sample the signal-latched requests and, in --json mode, stream freshly appended
@@ -389,6 +487,7 @@ static void oneshot_state_destroy(struct oneshot_state *state)
     free(state->images);
     state->images = NULL;
     state->n_images = 0;
+    buf_free(&state->delta_text);
     transcript_log_close(state->transcript);
     session_log_close(state->session_log);
     agent_session_free(&state->session);
@@ -559,7 +658,7 @@ static void run_user_turn(struct oneshot_state *state, const char *prompt, int m
         .hooks =
             {
                 .user = state,
-                .poll = oneshot_poll,
+                .poll = loop_poll,
                 .checkpoint = loop_checkpoint,
                 .compact = auto_compact,
             },
@@ -567,6 +666,8 @@ static void run_user_turn(struct oneshot_state *state, const char *prompt, int m
     if (state->json) {
         loop_params.hooks.turn_begin = json_turn_begin;
         loop_params.hooks.tool_seen = json_tool_seen;
+        if (state->json_deltas)
+            loop_params.hooks.observe = json_delta_observe;
     }
     agent_loop_run(&loop_params, loop_result);
 }
@@ -625,7 +726,9 @@ int oneshot_run(struct provider *provider, const char *prompt, const struct hax_
         .provider = provider,
         .context_tokens = -1,
         .json = options->json,
+        .json_deltas = options->json && options->json_deltas,
     };
+    buf_init(&state.delta_text);
 
     if (start_run(&state, prompt, options) != 0) {
         oneshot_state_destroy(&state);

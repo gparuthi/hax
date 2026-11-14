@@ -120,6 +120,22 @@ any result record, so also treat process exit as terminal. The exit status match
 unwritable mid-run (the consumer exited, the disk filled), hax stops the run and exits nonzero
 rather than keep working unobserved.
 
+### Live text: `--json-deltas`
+
+With `--json-deltas` (only valid alongside `--json`) the stream also carries the assistant's text
+as it is generated, so a consumer can render a reply before its `assistant` record lands. These
+lines are presentation only: they are never session items, and without the flag the stream is
+unchanged.
+
+| Record | Meaning |
+| --- | --- |
+| `{"type": "text_delta", "text": "..."}` | Text to append to what is shown. Coalesced to at most one line per ~50 ms; always valid UTF-8, so a character split across provider chunks waits for its tail. |
+| `{"type": "text_reset"}` | Discard the text shown so far. Written at the start of every model round-trip and when an attempt is retried, which re-streams the round from its start. |
+
+Text from a round that ends in tool calls is followed by the next round's `text_reset`, so after
+the last reset the shown text is the answer in progress; the `assistant` records and the
+`result` record stay the authoritative text. Reasoning is not streamed.
+
 Example — watch tool calls and cost from a script, no state-directory knowledge needed:
 
 ```sh

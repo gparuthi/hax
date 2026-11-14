@@ -199,6 +199,21 @@ static void test_parse_json_implies_print(void)
     EXPECT(options.agent_options.json == 0);
 }
 
+static void test_parse_json_deltas_needs_json(void)
+{
+    struct cli_options options;
+    char *with_json[] = {"hax", "--json", "--json-deltas", "hi", NULL};
+    EXPECT(cli_parse(4, with_json, &options) == CLI_PARSE_OK);
+    EXPECT(options.agent_options.json_deltas == 1);
+
+    char *alone[] = {"hax", "-p", "--json-deltas", "hi", NULL};
+    EXPECT(cli_parse(4, alone, &options) == CLI_PARSE_ERROR);
+
+    char *json_only[] = {"hax", "--json", "hi", NULL};
+    EXPECT(cli_parse(3, json_only, &options) == CLI_PARSE_OK);
+    EXPECT(options.agent_options.json_deltas == 0);
+}
+
 static void test_parse_image_flags(void)
 {
     struct cli_options options;
@@ -480,6 +495,7 @@ int main(void)
     test_parse_rejects_missing_values_and_interactive_prompt();
     test_parse_leading_preset();
     test_parse_json_implies_print();
+    test_parse_json_deltas_needs_json();
     test_parse_image_flags();
     test_parse_version_prints_and_exits();
     test_help_wraps_to_display_width();
